@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import { X, Maximize, Minimize, Home, ChevronLeft, ChevronRight } from 'lucide-react'
+import { X, Maximize, Minimize, Home, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
 import type { Story, Scene, Panel, Choice } from '@/types/database'
 
 interface StoryWithScenes extends Story {
@@ -15,6 +15,16 @@ interface StoryReaderProps {
 }
 
 type ReadingMode = 'focus' | 'panel-to-panel'
+
+// Preload images utility
+const preloadImage = (src: string): Promise<HTMLImageElement> => {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => resolve(img)
+    img.onerror = reject
+    img.src = src
+  })
+}
 
 // Focus Mode Icon (zoom/spotlight style)
 const FocusModeIcon = ({ active }: { active: boolean }) => (
@@ -76,6 +86,47 @@ export default function StoryReader({ story, choices }: StoryReaderProps) {
   const [hoverSide, setHoverSide] = useState<'left' | 'right' | null>(null)
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 })
   const [history, setHistory] = useState<HistoryEntry[]>([])
+  const [loadedImages, setLoadedImages] = useState<Set<string>>(new Set())
+  const [isLoading, setIsLoading] = useState(true)
+
+  // Get all unique image URLs for preloading
+  const allImageUrls = useMemo(() => {
+    return [...new Set(story.scenes?.map(s => s.image_url).filter(Boolean) || [])]
+  }, [story.scenes])
+
+  // Preload all images on mount
+  useEffect(() => {
+    let isMounted = true
+    setIsLoading(true)
+    
+    const preloadAll = async () => {
+      const promises = allImageUrls.map(async (url) => {
+        try {
+          await preloadImage(url)
+          if (isMounted) {
+            setLoadedImages(prev => new Set([...prev, url]))
+          }
+        } catch (err) {
+          console.warn('Failed to preload:', url)
+        }
+      })
+      
+      await Promise.all(promises)
+      if (isMounted) {
+        setIsLoading(false)
+      }
+    }
+    
+    preloadAll()
+    
+    return () => { isMounted = false }
+  }, [allImageUrls])
+
+  // Check if current scene image is loaded
+  const isCurrentImageLoaded = useMemo(() => {
+    const currentUrl = story.scenes?.find(s => s.id === currentSceneId)?.image_url
+    return currentUrl ? loadedImages.has(currentUrl) : false
+  }, [currentSceneId, loadedImages, story.scenes])
 
   // Get current scene and its panels
   const currentScene = story.scenes?.find(s => s.id === currentSceneId)
@@ -320,6 +371,19 @@ export default function StoryReader({ story, choices }: StoryReaderProps) {
     return () => window.removeEventListener('keydown', handleKey)
   }, [goNext, goPrev, showChoices, storyEnded, toggleFullscreen, router])
 
+  // Loading screen
+  if (isLoading || !isCurrentImageLoaded) {
+    return (
+      <div className="fixed inset-0 z-50 bg-black flex flex-col items-center justify-center">
+        <Loader2 size={48} className="text-white/60 animate-spin mb-4" />
+        <p className="text-white/60 text-sm">Hikaye yükleniyor...</p>
+        <p className="text-white/30 text-xs mt-2">
+          {loadedImages.size} / {allImageUrls.length} görsel
+        </p>
+      </div>
+    )
+  }
+
   if (!currentScene || !currentPanel) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white">
@@ -461,18 +525,22 @@ export default function StoryReader({ story, choices }: StoryReaderProps) {
               top: 0,
               transform: `translate(${focusTranslateX}px, ${focusTranslateY}px) scale(${focusScale})`,
               transformOrigin: '0 0',
-              transition: 'transform 0.35s cubic-bezier(0.4, 0, 0.2, 1)'
+              transition: 'transform 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
+              willChange: 'transform'
             }}
           >
             {/* Dimmed background image */}
             <img
               src={currentScene.image_url}
               alt=""
+              loading="eager"
+              decoding="async"
               style={{ 
                 display: 'block', 
                 width: currentScene.image_width, 
                 height: currentScene.image_height, 
-                opacity: 0.12 
+                opacity: 0.12,
+                willChange: 'opacity'
               }}
               draggable={false}
             />
@@ -481,6 +549,8 @@ export default function StoryReader({ story, choices }: StoryReaderProps) {
               key={`focus-${currentSceneId}-${currentPanelIndex}`}
               src={currentScene.image_url}
               alt=""
+              loading="eager"
+              decoding="async"
               style={{
                 position: 'absolute',
                 top: 0,
@@ -489,7 +559,8 @@ export default function StoryReader({ story, choices }: StoryReaderProps) {
                 width: currentScene.image_width,
                 height: currentScene.image_height,
                 clipPath: currentClipPath,
-                animation: 'fadeIn 0.3s ease-out'
+                animation: 'fadeIn 0.3s ease-out',
+                willChange: 'clip-path, opacity'
               }}
               draggable={false}
             />
@@ -505,16 +576,20 @@ export default function StoryReader({ story, choices }: StoryReaderProps) {
               top: 0,
               transform: `translate(${p2pTranslateX}px, ${p2pTranslateY}px) scale(${p2pScale})`,
               transformOrigin: '0 0',
+              willChange: 'transform'
             }}
           >
             {/* Full image */}
             <img
               src={currentScene.image_url}
               alt=""
+              loading="eager"
+              decoding="async"
               style={{ 
                 display: 'block', 
                 width: currentScene.image_width, 
-                height: currentScene.image_height
+                height: currentScene.image_height,
+                willChange: 'auto'
               }}
               draggable={false}
             />
