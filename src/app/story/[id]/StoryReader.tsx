@@ -180,17 +180,33 @@ export default function StoryReader({ story, choices }: StoryReaderProps) {
     setRevealedPanels(new Set([0]))
   }, [currentSceneId])
 
-  // Measure viewport
+  // Measure viewport - with ResizeObserver for accurate sizing
   useEffect(() => {
     const measure = () => {
       if (viewRef.current) {
-        setViewSize({ w: viewRef.current.clientWidth, h: viewRef.current.clientHeight })
+        const rect = viewRef.current.getBoundingClientRect()
+        setViewSize({ w: rect.width, h: rect.height })
       }
     }
-    measure()
+    
+    // Initial measurement after a small delay to ensure layout is complete
+    const timer = setTimeout(measure, 50)
+    
+    // Use ResizeObserver for more accurate resize detection
+    let resizeObserver: ResizeObserver | null = null
+    if (viewRef.current && typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(measure)
+      resizeObserver.observe(viewRef.current)
+    }
+    
     window.addEventListener('resize', measure)
-    return () => window.removeEventListener('resize', measure)
-  }, [isFullscreen])
+    
+    return () => {
+      clearTimeout(timer)
+      window.removeEventListener('resize', measure)
+      resizeObserver?.disconnect()
+    }
+  }, [isFullscreen, isLoading])
 
   // Fullscreen handling
   useEffect(() => {
@@ -510,7 +526,7 @@ export default function StoryReader({ story, choices }: StoryReaderProps) {
       {/* Viewport */}
       <div 
         ref={viewRef}
-        className="flex-1 relative overflow-hidden"
+        className="absolute inset-0 overflow-hidden"
         style={{ cursor: hoverSide ? 'none' : 'default' }}
         onMouseMove={handleMouseMove}
         onMouseLeave={() => setHoverSide(null)}
