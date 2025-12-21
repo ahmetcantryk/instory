@@ -9,9 +9,14 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@comic-panel-toolkit/core": "^0.2.0",
+    "@supabase/ssr": "^0.8.0",
+    "@supabase/supabase-js": "^2.89.0",
+    "lucide-react": "^0.562.0",
     "next": "16.1.0",
     "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "react-dom": "19.2.3",
+    "reactflow": "^11.11.4"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
