@@ -51,8 +51,8 @@ export default async function HomePage() {
 
         {/* Background Typography (Subtle) */}
         {/* Background Typography (Subtle) */}
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-[0.06]">
-          <h1 className="text-[20vw] font-black tracking-tighter text-black">STORY</h1>
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none ">
+          <h1 className=" font-black tracking-tighter text-black d-block" style={{ fontSize: '500px' }}>STORY</h1>
         </div>
 
         {stories && stories.length > 0 ? (
