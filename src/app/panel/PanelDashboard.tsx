@@ -351,7 +351,7 @@ function SceneEditor({ scene, onPanelsChange, onBack }: SceneEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const imageRef = useRef<HTMLImageElement | null>(null)
-  const animationRef = useRef<number>()
+  const animationRef = useRef<number | undefined>(undefined)
 
   const [localPanels, setLocalPanels] = useState<LocalPanel[]>(() => {
     return (scene.panels || []).map((p) => ({
