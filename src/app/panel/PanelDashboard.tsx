@@ -595,38 +595,91 @@ function SceneEditor({ scene, onPanelsChange, onBack }: SceneEditorProps) {
   const savePanels = useCallback(async () => {
     setSaving(true)
     try {
-      // First delete existing panels (this will cascade delete texts)
-      await supabase.from('panels').delete().eq('scene_id', scene.id)
+      // Mevcut panel ID'lerini al (silinecekleri bulmak için)
+      const { data: existingPanels } = await supabase
+        .from('panels')
+        .select('id')
+        .eq('scene_id', scene.id)
       
-      const panelsToInsert = localPanels.map(p => ({
-        scene_id: scene.id,
-        shape: p.shape,
-        x: Math.round(p.x),
-        y: Math.round(p.y),
-        width: Math.round(p.w),
-        height: Math.round(p.h),
-        points: p.points || null,
-        brush_strokes: p.brushStrokes || null,
-        ellipse_data: p.center ? { centerX: p.center.x, centerY: p.center.y, rx: p.rx, ry: p.ry } : null,
-        order_index: p.index
-      }))
+      const existingIds = new Set(existingPanels?.map(p => p.id) || [])
+      const currentIds = new Set(localPanels.filter(p => p.dbId).map(p => p.dbId))
       
-      if (panelsToInsert.length > 0) {
-        const { data: savedPanels, error } = await supabase.from('panels').insert(panelsToInsert).select()
-        if (error) throw error
-        
-        // Update local panels with new dbIds
-        if (savedPanels) {
-          setLocalPanels(prev => prev.map((p, i) => ({
-            ...p,
-            dbId: savedPanels[i]?.id
-          })))
-        }
-        
-        onPanelsChange(savedPanels || [])
-      } else {
-        onPanelsChange([])
+      // Silinecek panelleri bul (metinleri olan paneller korunacak şekilde kontrol et)
+      const idsToDelete = [...existingIds].filter(id => !currentIds.has(id))
+      
+      // Sadece kaldırılan panelleri sil
+      if (idsToDelete.length > 0) {
+        const { error: deleteError } = await supabase
+          .from('panels')
+          .delete()
+          .in('id', idsToDelete)
+        if (deleteError) throw deleteError
       }
+      
+      // Mevcut panelleri güncelle, yenileri ekle
+      const panelsToUpdate = localPanels.filter(p => p.dbId)
+      const panelsToInsert = localPanels.filter(p => !p.dbId)
+      
+      // Mevcut panelleri güncelle
+      for (const p of panelsToUpdate) {
+        const { error: updateError } = await supabase
+          .from('panels')
+          .update({
+            shape: p.shape,
+            x: Math.round(p.x),
+            y: Math.round(p.y),
+            width: Math.round(p.w),
+            height: Math.round(p.h),
+            points: p.points || null,
+            brush_strokes: p.brushStrokes || null,
+            ellipse_data: p.center ? { centerX: p.center.x, centerY: p.center.y, rx: p.rx, ry: p.ry } : null,
+            order_index: p.index
+          })
+          .eq('id', p.dbId)
+        if (updateError) throw updateError
+      }
+      
+      // Yeni panelleri ekle
+      if (panelsToInsert.length > 0) {
+        const insertData = panelsToInsert.map(p => ({
+          scene_id: scene.id,
+          shape: p.shape,
+          x: Math.round(p.x),
+          y: Math.round(p.y),
+          width: Math.round(p.w),
+          height: Math.round(p.h),
+          points: p.points || null,
+          brush_strokes: p.brushStrokes || null,
+          ellipse_data: p.center ? { centerX: p.center.x, centerY: p.center.y, rx: p.rx, ry: p.ry } : null,
+          order_index: p.index
+        }))
+        
+        const { data: newPanels, error: insertError } = await supabase
+          .from('panels')
+          .insert(insertData)
+          .select()
+        if (insertError) throw insertError
+        
+        // Yeni panellerin dbId'lerini güncelle
+        if (newPanels) {
+          let newIndex = 0
+          setLocalPanels(prev => prev.map(p => {
+            if (!p.dbId && newIndex < newPanels.length) {
+              return { ...p, dbId: newPanels[newIndex++]?.id }
+            }
+            return p
+          }))
+        }
+      }
+      
+      // Güncel panel listesini al
+      const { data: allPanels } = await supabase
+        .from('panels')
+        .select('*')
+        .eq('scene_id', scene.id)
+        .order('order_index')
+      
+      onPanelsChange(allPanels || [])
     } catch (err) {
       console.error('Save error:', err)
       alert('Kaydetme hatası!')

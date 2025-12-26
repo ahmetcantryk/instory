@@ -463,31 +463,38 @@ export default function TextEditor({
           if (updateError) throw new Error(`Metin güncellenemedi: ${updateError.message}`)
 
           for (const content of text.contents) {
+            // Upsert kullan - varsa güncelle, yoksa ekle
+            const upsertData: {
+              id?: string
+              panel_text_id: string
+              language: string
+              text: string
+              style_override: unknown
+            } = {
+              panel_text_id: text.dbId,
+              language: content.language,
+              text: content.text,
+              style_override: content.style_override
+            }
+            
+            // Sadece dbId varsa id'yi ekle
             if (content.dbId) {
-              const { error: contentUpdateError } = await supabase
-                .from('panel_text_contents')
-                .update({ text: content.text, style_override: content.style_override })
-                .eq('id', content.dbId)
-              
-              if (contentUpdateError) throw new Error(`İçerik güncellenemedi: ${contentUpdateError.message}`)
-            } else {
-              const { data: newContent, error: contentInsertError } = await supabase
-                .from('panel_text_contents')
-                .insert({
-                  panel_text_id: text.dbId,
-                  language: content.language,
-                  text: content.text,
-                  style_override: content.style_override
-                })
-                .select()
-                .single()
-              
-              if (contentInsertError) throw new Error(`İçerik eklenemedi: ${contentInsertError.message}`)
-              
-              if (newContent) {
-                content.dbId = newContent.id
-                content.isNew = false
-              }
+              upsertData.id = content.dbId
+            }
+            
+            const { data: upsertedContent, error: contentUpsertError } = await supabase
+              .from('panel_text_contents')
+              .upsert(upsertData, {
+                onConflict: 'panel_text_id,language'
+              })
+              .select()
+              .single()
+            
+            if (contentUpsertError) throw new Error(`İçerik kaydedilemedi: ${contentUpsertError.message}`)
+            
+            if (upsertedContent) {
+              content.dbId = upsertedContent.id
+              content.isNew = false
             }
           }
         }

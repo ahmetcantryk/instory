@@ -758,6 +758,12 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
 
   // Click handler
   const handleViewClick = useCallback((e: React.MouseEvent) => {
+    // Dokunma olayı zaten işlendi, click'i atla (mobilde çift tetiklemeyi önle)
+    if (touchHandled.current) {
+      touchHandled.current = false
+      return
+    }
+    
     if (showChoices || storyEnded) return
     if (showLanguageMenu) {
       setShowLanguageMenu(false)
@@ -786,10 +792,12 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
   // Touch handlers for mobile
   const touchStartX = useRef<number | null>(null)
   const touchStartY = useRef<number | null>(null)
+  const touchHandled = useRef<boolean>(false)
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     touchStartX.current = e.touches[0].clientX
     touchStartY.current = e.touches[0].clientY
+    touchHandled.current = false
   }, [])
 
   const handleTouchEnd = useCallback((e: React.TouchEvent) => {
@@ -806,6 +814,7 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
     
     // Horizontal swipe check
     if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > minSwipeDistance) {
+      touchHandled.current = true
       if (deltaX > 0 && canGoBack) {
         // Swipe right - go back
         goPrev()
@@ -815,6 +824,7 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
       }
     } else if (Math.abs(deltaX) < 15 && Math.abs(deltaY) < 15) {
       // Tap - determine action based on tap position
+      touchHandled.current = true
       const rect = e.currentTarget.getBoundingClientRect()
       const tapX = touchEndX - rect.left
       const relX = tapX / rect.width
@@ -1324,26 +1334,6 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
         )}
 
         {/* Mobile/Tablet navigation buttons */}
-        {(isMobile || isTablet) && showControls && !showChoices && !storyEnded && (
-          <>
-            {canGoBack && (
-              <button
-                onClick={(e) => { e.stopPropagation(); goPrev() }}
-                className="mobile-nav-button absolute left-3 sm:left-4 top-1/2 -translate-y-1/2 z-40"
-                aria-label="Önceki"
-              >
-                <ChevronLeft size={24} className="text-white" />
-              </button>
-            )}
-            <button
-              onClick={(e) => { e.stopPropagation(); goNext() }}
-              className="mobile-nav-button absolute right-3 sm:right-4 top-1/2 -translate-y-1/2 z-40"
-              aria-label="Sonraki"
-            >
-              <ChevronRight size={24} className="text-white" />
-            </button>
-          </>
-        )}
 
         {/* Choice overlay */}
         {showChoices && sceneChoices.length > 0 && (
