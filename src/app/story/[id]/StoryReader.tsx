@@ -213,7 +213,7 @@ function TextOverlayRenderer({ texts, language, scale, imageWidth, imageHeight }
               
               // Efektler
               opacity: mergedStyle.opacity ?? 1,
-              direction: mergedStyle.direction || 'ltr',
+              direction: (mergedStyle.direction === 'ltr' || mergedStyle.direction === 'rtl') ? mergedStyle.direction : 'ltr',
               writingMode: mergedStyle.isVertical ? 'vertical-rl' : undefined,
               
               // Stroke/outline - SFX için text shadow
