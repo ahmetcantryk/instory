@@ -52,7 +52,7 @@ export default async function HomePage() {
         {/* Background Typography - Hidden on mobile, visible on larger screens */}
         <div className="hidden lg:flex absolute inset-0 items-center justify-center pointer-events-none overflow-hidden">
           <h1 
-            className="font-black tracking-tighter text-black/[0.03] select-none"
+            className="font-black tracking-tighter text-black/[0.03] select-none "
             style={{ fontSize: 'clamp(200px, 30vw, 500px)' }}
           >
             STORY
