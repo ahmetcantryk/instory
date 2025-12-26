@@ -28,15 +28,34 @@ import {
   Eye,
   EyeOff,
   GitBranch,
-  Save
+  Save,
+  Type,
+  Music
 } from 'lucide-react'
-import type { Story, Scene, Panel, Choice } from '@/types/database'
+import type { Story, Scene, Panel, Choice, PanelText, PanelTextContent, TextStyle, SupportedLanguage } from '@/types/database'
+import TextEditor from '@/components/TextEditor'
+import AudioManager from '@/components/AudioManager'
+
+// Hex rengi RGBA'ya çevir (reader için)
+const hexToRgba = (hex: string, opacity: number): string => {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
+  if (!result) return `rgba(255, 255, 255, ${opacity})`
+  return `rgba(${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}, ${opacity})`
+}
+
+const getBackgroundStyle = (style: Partial<TextStyle>, bubbleType?: string): string => {
+  if (bubbleType === 'sfx' || bubbleType === 'none') return 'transparent'
+  const opacity = style.backgroundOpacity ?? 1
+  if (opacity === 0) return 'transparent'
+  const bgColor = style.backgroundColor || '#FFFFFF'
+  return hexToRgba(bgColor, opacity)
+}
 
 // ============================================================================
 // TYPES
 // ============================================================================
 
-type DrawingTool = 'select' | 'rectangle' | 'ellipse' | 'freeform' | 'brush' | 'pan'
+type DrawingTool = 'select' | 'rectangle' | 'ellipse' | 'freeform' | 'brush' | 'pan' | 'text'
 type ReadingDirection = 'ltr' | 'rtl'
 type PanelShape = 'rectangle' | 'polygon' | 'ellipse' | 'brush'
 
@@ -47,6 +66,16 @@ interface Point {
 
 interface BrushPoint extends Point {
   size: number
+}
+
+interface LocalPanelText {
+  id: string
+  position_x: number
+  position_y: number
+  width: number | null
+  bubble_type: string
+  style: Partial<TextStyle>
+  contents: { language: SupportedLanguage; text: string }[]
 }
 
 interface LocalPanel {
@@ -64,6 +93,7 @@ interface LocalPanel {
   rx?: number
   ry?: number
   dbId?: string
+  texts?: LocalPanelText[]
 }
 
 interface StoryWithScenes extends Story {
@@ -137,16 +167,65 @@ interface ReaderDialogProps {
 }
 
 const ReaderDialog: React.FC<ReaderDialogProps> = ({ isOpen, onClose, scene, panels }) => {
+  const supabase = createClient()
   const [currentIndex, setCurrentIndex] = useState(0)
   const [viewSize, setViewSize] = useState({ w: 800, h: 600 })
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [isTransitioning, setIsTransitioning] = useState(false)
+  const [panelTexts, setPanelTexts] = useState<Record<string, LocalPanelText[]>>({})
   const viewRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
   const sortedPanels = useMemo(() => {
     return [...panels].sort((a, b) => a.index - b.index)
   }, [panels])
+
+  // Fetch panel texts when dialog opens
+  useEffect(() => {
+    if (!isOpen || panels.length === 0) return
+    
+    const fetchTexts = async () => {
+      const dbIds = panels.filter(p => p.dbId).map(p => p.dbId!)
+      if (dbIds.length === 0) return
+
+      try {
+        const { data, error } = await supabase
+          .from('panel_texts')
+          .select('*, panel_text_contents(*)')
+          .in('panel_id', dbIds)
+
+        if (error) {
+          console.error('Error fetching texts:', error)
+          return
+        }
+
+        if (data) {
+          const textsByPanel: Record<string, LocalPanelText[]> = {}
+          data.forEach((t: PanelText & { panel_text_contents?: PanelTextContent[] }) => {
+            const panelId = t.panel_id
+            if (!textsByPanel[panelId]) textsByPanel[panelId] = []
+            textsByPanel[panelId].push({
+              id: t.id,
+              position_x: Number(t.position_x),
+              position_y: Number(t.position_y),
+              width: t.width ? Number(t.width) : null,
+              bubble_type: t.bubble_type || 'speech',
+              style: (t.style as Partial<TextStyle>) || {},
+              contents: (t.panel_text_contents || []).map(c => ({
+                language: c.language,
+                text: c.text
+              }))
+            })
+          })
+          setPanelTexts(textsByPanel)
+        }
+      } catch (err) {
+        console.error('Error:', err)
+      }
+    }
+
+    fetchTexts()
+  }, [isOpen, panels, supabase])
 
   const panel = sortedPanels[currentIndex]
 
@@ -302,6 +381,48 @@ const ReaderDialog: React.FC<ReaderDialogProps> = ({ isOpen, onClose, scene, pan
             }} 
             draggable={false} 
           />
+          
+          {/* Text Overlays */}
+          {panel.dbId && panelTexts[panel.dbId]?.map((textOverlay) => {
+            const content = textOverlay.contents.find(c => c.language === 'tr') || textOverlay.contents[0]
+            const text = content?.text || ''
+            if (!text) return null
+            
+            const style = textOverlay.style
+            const bgStyle = getBackgroundStyle(style, textOverlay.bubble_type)
+            
+            return (
+              <div
+                key={textOverlay.id}
+                className="absolute pointer-events-none select-none"
+                style={{
+                  left: textOverlay.position_x,
+                  top: textOverlay.position_y,
+                  width: textOverlay.width || 'auto',
+                  zIndex: 100,
+                  fontFamily: style.fontFamily || 'Comic Sans MS, cursive, sans-serif',
+                  fontSize: style.fontSize || 16,
+                  fontWeight: style.fontWeight || 'bold',
+                  fontStyle: style.fontStyle || 'normal',
+                  color: style.color || '#000000',
+                  backgroundColor: bgStyle,
+                  textAlign: (style.textAlign as React.CSSProperties['textAlign']) || 'center',
+                  padding: style.padding || 12,
+                  borderRadius: textOverlay.bubble_type === 'thought' ? 9999 : (style.borderRadius || 20),
+                  lineHeight: 1.3,
+                  textTransform: textOverlay.bubble_type === 'shout' ? 'uppercase' : undefined,
+                  textShadow: textOverlay.bubble_type === 'sfx' 
+                    ? `2px 2px 0 ${style.backgroundColor || '#FFFFFF'}, -2px -2px 0 ${style.backgroundColor || '#FFFFFF'}`
+                    : undefined,
+                  transition: 'opacity 0.3s ease-out',
+                }}
+              >
+                {text.split('\n').map((line, i) => (
+                  <div key={i}>{line}</div>
+                ))}
+              </div>
+            )
+          })}
         </div>
       </div>
 
@@ -391,6 +512,9 @@ function SceneEditor({ scene, onPanelsChange, onBack }: SceneEditorProps) {
 
   const [isReaderOpen, setIsReaderOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  
+  // Text editor state
+  const [showTextEditor, setShowTextEditor] = useState(false)
 
   useEffect(() => {
     const img = new Image()
@@ -471,7 +595,9 @@ function SceneEditor({ scene, onPanelsChange, onBack }: SceneEditorProps) {
   const savePanels = useCallback(async () => {
     setSaving(true)
     try {
+      // First delete existing panels (this will cascade delete texts)
       await supabase.from('panels').delete().eq('scene_id', scene.id)
+      
       const panelsToInsert = localPanels.map(p => ({
         scene_id: scene.id,
         shape: p.shape,
@@ -484,10 +610,20 @@ function SceneEditor({ scene, onPanelsChange, onBack }: SceneEditorProps) {
         ellipse_data: p.center ? { centerX: p.center.x, centerY: p.center.y, rx: p.rx, ry: p.ry } : null,
         order_index: p.index
       }))
+      
       if (panelsToInsert.length > 0) {
-        const { data, error } = await supabase.from('panels').insert(panelsToInsert).select()
+        const { data: savedPanels, error } = await supabase.from('panels').insert(panelsToInsert).select()
         if (error) throw error
-        onPanelsChange(data || [])
+        
+        // Update local panels with new dbIds
+        if (savedPanels) {
+          setLocalPanels(prev => prev.map((p, i) => ({
+            ...p,
+            dbId: savedPanels[i]?.id
+          })))
+        }
+        
+        onPanelsChange(savedPanels || [])
       } else {
         onPanelsChange([])
       }
@@ -896,6 +1032,26 @@ function SceneEditor({ scene, onPanelsChange, onBack }: SceneEditorProps) {
               <t.icon size={18} />
             </button>
           ))}
+          
+          <div className="h-px bg-gray-700 w-8 my-1" />
+          
+          {/* Text tool - opens text editor for selected panel */}
+          <button
+            onClick={() => {
+              if (selectedPanelId) {
+                setShowTextEditor(true)
+              } else {
+                alert('Önce bir panel seçin!')
+              }
+            }}
+            disabled={!selectedPanelId}
+            className={`w-10 h-10 rounded flex items-center justify-center transition-colors ${
+              showTextEditor ? 'bg-purple-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-white'
+            } disabled:opacity-30 disabled:cursor-not-allowed`}
+            title="Metin Ekle (Panel seçili olmalı)"
+          >
+            <Type size={18} />
+          </button>
 
           <div className="flex-1" />
 
@@ -984,6 +1140,15 @@ function SceneEditor({ scene, onPanelsChange, onBack }: SceneEditorProps) {
                     {panel.index + 1}
                   </span>
                   <span className="flex-1 capitalize">{panel.shape}</span>
+                  {panel.dbId && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setSelectedPanelId(panel.id); setShowTextEditor(true) }}
+                      className={`p-1 rounded ${panel.id === selectedPanelId ? 'hover:bg-blue-500' : 'hover:bg-purple-600 bg-gray-700'}`}
+                      title="Metin Ekle/Düzenle"
+                    >
+                      <Type size={12} />
+                    </button>
+                  )}
                   <button
                     onClick={(e) => { e.stopPropagation(); deletePanel(panel.id) }}
                     className="p-0.5 hover:bg-red-600 rounded opacity-50 hover:opacity-100"
@@ -1010,6 +1175,44 @@ function SceneEditor({ scene, onPanelsChange, onBack }: SceneEditorProps) {
         scene={scene}
         panels={localPanels}
       />
+      
+      {/* Text Editor Modal */}
+      {showTextEditor && selectedPanelId && (() => {
+        const selectedPanel = localPanels.find(p => p.id === selectedPanelId)
+        if (!selectedPanel || !selectedPanel.dbId) {
+          // Panel henüz kaydedilmemiş
+          return (
+            <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center">
+              <div className="bg-gray-800 rounded-xl p-8 text-center max-w-md">
+                <div className="text-yellow-500 text-6xl mb-4">⚠️</div>
+                <h2 className="text-white text-xl font-bold mb-4">Panel Kaydedilmeli</h2>
+                <p className="text-gray-400 mb-6">
+                  Metin eklemek için önce paneli kaydetmeniz gerekiyor.
+                  <br /><br />
+                  Üstteki <strong className="text-green-400">Kaydet</strong> butonuna tıklayın.
+                </p>
+                <button
+                  onClick={() => setShowTextEditor(false)}
+                  className="px-6 py-3 bg-gray-700 text-white rounded-lg hover:bg-gray-600"
+                >
+                  Tamam
+                </button>
+              </div>
+            </div>
+          )
+        }
+        
+        return (
+          <TextEditor
+            panelDbId={selectedPanel.dbId}
+            panelBounds={{ x: selectedPanel.x, y: selectedPanel.y, w: selectedPanel.w, h: selectedPanel.h }}
+            panelImageUrl={scene.image_url || ''}
+            imageWidth={scene.image_width || 800}
+            imageHeight={scene.image_height || 600}
+            onClose={() => setShowTextEditor(false)}
+          />
+        )
+      })()}
     </div>
   )
 }
@@ -1035,6 +1238,7 @@ export default function PanelDashboard({ initialStories, initialChoices, userId 
   const [storyForm, setStoryForm] = useState({ title: '', description: '' })
   const [sceneForm, setSceneForm] = useState({ title: '', is_decision_scene: false, is_start_scene: false })
   const [imageFile, setImageFile] = useState<File | null>(null)
+  const [showAudioManager, setShowAudioManager] = useState(false)
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -1219,14 +1423,21 @@ export default function PanelDashboard({ initialStories, initialChoices, userId 
                     {story.description && <p className="text-sm text-gray-500 line-clamp-2">{story.description}</p>}
                     <div className="mt-2 text-xs text-gray-400">{story.scenes?.length || 0} sahne</div>
                   </div>
-                  {/* Flow Editor Button */}
-                  <div className="px-4 py-2 border-t bg-purple-50">
+                  {/* Flow Editor & Audio Manager Buttons */}
+                  <div className="px-4 py-2 border-t bg-purple-50 space-y-2">
                     <button 
                       onClick={(e) => { e.stopPropagation(); router.push(`/panel/flow/${story.id}`) }} 
                       className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 transition-colors"
                     >
                       <GitBranch size={16} />
                       Hikaye Akışını Düzenle
+                    </button>
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); setSelectedStory(story); setShowAudioManager(true) }} 
+                      className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-orange-600 text-white text-sm font-medium rounded-lg hover:bg-orange-700 transition-colors"
+                    >
+                      <Music size={16} />
+                      Ses Yöneticisi
                     </button>
                   </div>
                   <div className="px-4 py-2 border-t bg-gray-50 flex items-center justify-between">
@@ -1363,6 +1574,15 @@ export default function PanelDashboard({ initialStories, initialChoices, userId 
             </div>
           </div>
         </div>
+      )}
+
+      {/* Audio Manager */}
+      {showAudioManager && selectedStory && (
+        <AudioManager
+          storyId={selectedStory.id}
+          scenes={selectedStory.scenes || []}
+          onClose={() => setShowAudioManager(false)}
+        />
       )}
     </div>
   )

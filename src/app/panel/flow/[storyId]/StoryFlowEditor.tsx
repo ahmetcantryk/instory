@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useCallback, useMemo, useEffect } from 'react'
+import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import ReactFlow, {
   Node,
@@ -15,7 +15,8 @@ import ReactFlow, {
   Handle,
   Position,
   NodeProps,
-  BackgroundVariant
+  BackgroundVariant,
+  NodeChange
 } from 'reactflow'
 import 'reactflow/dist/style.css'
 import { createClient } from '@/lib/supabase/client'
@@ -25,9 +26,11 @@ import {
   Edit3, 
   Check,
   GitBranch,
-  Play
+  Play,
+  Loader2,
+  CheckCircle
 } from 'lucide-react'
-import type { Story, Scene, Choice, Panel } from '@/types/database'
+import type { Story, Scene, Choice, Panel, ScenePosition } from '@/types/database'
 
 interface SceneWithPanels extends Scene {
   panels: Panel[]
@@ -37,6 +40,7 @@ interface StoryFlowEditorProps {
   story: Story
   initialScenes: SceneWithPanels[]
   initialChoices: Choice[]
+  initialPositions: ScenePosition[]
 }
 
 // Custom Scene Node Component
@@ -147,14 +151,19 @@ const nodeTypes = {
   sceneNode: SceneNode
 }
 
-export default function StoryFlowEditor({ story, initialScenes, initialChoices }: StoryFlowEditorProps) {
+export default function StoryFlowEditor({ story, initialScenes, initialChoices, initialPositions }: StoryFlowEditorProps) {
   const router = useRouter()
   const supabase = createClient()
   
   const [scenes, setScenes] = useState<SceneWithPanels[]>(initialScenes)
   const [choices, setChoices] = useState<Choice[]>(initialChoices)
+  const [positions, setPositions] = useState<ScenePosition[]>(initialPositions)
   const [saving, setSaving] = useState(false)
   const [hasChanges, setHasChanges] = useState(false)
+  const [positionsSaved, setPositionsSaved] = useState(false)
+  
+  // Debounce timer for position saving
+  const positionSaveTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   // Handle title change
   const handleTitleChange = useCallback((sceneId: string, newTitle: string) => {
@@ -164,15 +173,25 @@ export default function StoryFlowEditor({ story, initialScenes, initialChoices }
     setHasChanges(true)
   }, [])
 
-  // Convert scenes to nodes
+  // Get initial position for a scene
+  const getInitialPosition = useCallback((sceneId: string, index: number) => {
+    const savedPosition = positions.find(p => p.scene_id === sceneId)
+    if (savedPosition) {
+      return { x: Number(savedPosition.position_x), y: Number(savedPosition.position_y) }
+    }
+    // Default grid layout
+    return { 
+      x: (index % 4) * 280 + 50, 
+      y: Math.floor(index / 4) * 220 + 50 
+    }
+  }, [positions])
+
+  // Convert scenes to nodes with saved positions
   const initialNodes: Node[] = useMemo(() => {
     return scenes.map((scene, index) => ({
       id: scene.id,
       type: 'sceneNode',
-      position: { 
-        x: (index % 4) * 280 + 50, 
-        y: Math.floor(index / 4) * 220 + 50 
-      },
+      position: getInitialPosition(scene.id, index),
       data: {
         id: scene.id,
         title: scene.title,
@@ -183,9 +202,9 @@ export default function StoryFlowEditor({ story, initialScenes, initialChoices }
         onTitleChange: handleTitleChange
       }
     }))
-  }, [scenes, handleTitleChange])
+  }, [scenes, handleTitleChange, getInitialPosition])
 
-  // Convert choices to edges (different styling for normal flow vs choice)
+  // Convert choices to edges
   const initialEdges: Edge[] = useMemo(() => {
     return choices.map(choice => {
       const isNormalFlow = !choice.choice_text || choice.choice_text.trim() === ''
@@ -226,18 +245,93 @@ export default function StoryFlowEditor({ story, initialScenes, initialChoices }
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
 
+  // Save node positions to database (debounced)
+  const savePositions = useCallback(async (nodesToSave: Node[]) => {
+    try {
+      for (const node of nodesToSave) {
+        const existingPosition = positions.find(p => p.scene_id === node.id)
+        
+        if (existingPosition) {
+          // Update existing position
+          await supabase
+            .from('scene_positions')
+            .update({ 
+              position_x: node.position.x, 
+              position_y: node.position.y,
+              updated_at: new Date().toISOString()
+            })
+            .eq('scene_id', node.id)
+        } else {
+          // Insert new position
+          const { data } = await supabase
+            .from('scene_positions')
+            .insert({ 
+              scene_id: node.id, 
+              position_x: node.position.x, 
+              position_y: node.position.y 
+            })
+            .select()
+            .single()
+          
+          if (data) {
+            setPositions(prev => [...prev, data])
+          }
+        }
+      }
+      
+      setPositionsSaved(true)
+      setTimeout(() => setPositionsSaved(false), 2000)
+    } catch (err) {
+      console.error('Error saving positions:', err)
+    }
+  }, [positions, supabase])
+
+  // Custom onNodesChange that tracks position changes
+  const handleNodesChange = useCallback((changes: NodeChange[]) => {
+    onNodesChange(changes)
+    
+    // Check for position changes
+    const positionChanges = changes.filter(c => c.type === 'position' && c.dragging === false)
+    
+    if (positionChanges.length > 0) {
+      // Clear previous timer
+      if (positionSaveTimerRef.current) {
+        clearTimeout(positionSaveTimerRef.current)
+      }
+      
+      // Debounce save
+      positionSaveTimerRef.current = setTimeout(() => {
+        // Get current node positions
+        setNodes(currentNodes => {
+          const movedNodeIds = positionChanges.map(c => 'id' in c ? c.id : null).filter(Boolean)
+          const movedNodes = currentNodes.filter(n => movedNodeIds.includes(n.id))
+          if (movedNodes.length > 0) {
+            savePositions(movedNodes)
+          }
+          return currentNodes
+        })
+      }, 500)
+    }
+  }, [onNodesChange, savePositions, setNodes])
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (positionSaveTimerRef.current) {
+        clearTimeout(positionSaveTimerRef.current)
+      }
+    }
+  }, [])
+
   // Update nodes when scenes change
   useEffect(() => {
     setNodes(prevNodes => {
-      return scenes.map(scene => {
+      return scenes.map((scene, index) => {
         const existingNode = prevNodes.find(n => n.id === scene.id)
         return {
           id: scene.id,
           type: 'sceneNode',
-          position: existingNode?.position || { 
-            x: (scenes.indexOf(scene) % 4) * 280 + 50, 
-            y: Math.floor(scenes.indexOf(scene) / 4) * 220 + 50 
-          },
+          position: existingNode?.position || getInitialPosition(scene.id, index),
           data: {
             id: scene.id,
             title: scene.title,
@@ -250,13 +344,12 @@ export default function StoryFlowEditor({ story, initialScenes, initialChoices }
         }
       })
     })
-  }, [scenes, setNodes, handleTitleChange])
+  }, [scenes, setNodes, handleTitleChange, getInitialPosition])
 
-  // Handle new connection (can be normal flow or choice)
+  // Handle new connection
   const onConnect = useCallback(async (params: Connection) => {
     if (!params.source || !params.target) return
 
-    // Check if connection already exists
     const exists = choices.some(c => 
       c.from_scene_id === params.source && c.to_scene_id === params.target
     )
@@ -264,7 +357,6 @@ export default function StoryFlowEditor({ story, initialScenes, initialChoices }
 
     const sourceScene = scenes.find(s => s.id === params.source)
     
-    // Ask user: normal flow or choice?
     const connectionType = prompt(
       'Bağlantı türü:\n\n' +
       '1) Normal akış (seçimsiz) → Boş bırakın veya "1" yazın\n' +
@@ -272,13 +364,11 @@ export default function StoryFlowEditor({ story, initialScenes, initialChoices }
       'Seçiminiz:'
     )
     
-    // User cancelled
     if (connectionType === null) return
 
     const isNormalFlow = connectionType.trim() === '' || connectionType.trim() === '1'
     const choiceText = isNormalFlow ? '' : connectionType.trim()
 
-    // Create choice in database (empty choice_text means normal flow)
     const { data, error } = await supabase.from('choices').insert({
       from_scene_id: params.source,
       to_scene_id: params.target,
@@ -289,7 +379,6 @@ export default function StoryFlowEditor({ story, initialScenes, initialChoices }
     if (!error && data) {
       setChoices(prev => [...prev, data])
       
-      // Different styling for normal flow vs choice
       const edgeStyle = isNormalFlow ? {
         id: data.id,
         style: { stroke: '#22c55e', strokeWidth: 2 },
@@ -318,7 +407,6 @@ export default function StoryFlowEditor({ story, initialScenes, initialChoices }
         ...edgeStyle
       }, eds))
       
-      // Mark source scene as decision scene only if it's a choice (not normal flow)
       if (!isNormalFlow && sourceScene && !sourceScene.is_decision_scene) {
         await supabase.from('scenes').update({ is_decision_scene: true }).eq('id', params.source)
         setScenes(prev => prev.map(s => 
@@ -342,7 +430,6 @@ export default function StoryFlowEditor({ story, initialScenes, initialChoices }
       setChoices(prev => prev.filter(c => c.id !== edge.id))
       setEdges(eds => eds.filter(e => e.id !== edge.id))
 
-      // Check if source scene still has choices (only count real choices, not normal flows)
       const remainingChoices = choices.filter(c => 
         c.from_scene_id === edge.source && 
         c.id !== edge.id && 
@@ -368,6 +455,10 @@ export default function StoryFlowEditor({ story, initialScenes, initialChoices }
           await supabase.from('scenes').update({ title: scene.title }).eq('id', scene.id)
         }
       }
+      
+      // Save all current node positions
+      await savePositions(nodes)
+      
       setHasChanges(false)
     } catch (err) {
       console.error('Save error:', err)
@@ -375,13 +466,11 @@ export default function StoryFlowEditor({ story, initialScenes, initialChoices }
     } finally {
       setSaving(false)
     }
-  }, [scenes, initialScenes, supabase])
+  }, [scenes, initialScenes, supabase, savePositions, nodes])
 
   // Set start scene
   const handleSetStartScene = useCallback(async (sceneId: string) => {
-    // First unset all start scenes
     await supabase.from('scenes').update({ is_start_scene: false }).eq('story_id', story.id)
-    // Then set the new start scene
     const { error } = await supabase.from('scenes').update({ is_start_scene: true }).eq('id', sceneId)
     if (!error) {
       setScenes(prev => prev.map(s => ({ ...s, is_start_scene: s.id === sceneId })))
@@ -429,15 +518,21 @@ export default function StoryFlowEditor({ story, initialScenes, initialChoices }
           </div>
         </div>
         <div className="flex items-center gap-3">
+          {/* Position saved indicator */}
+          {positionsSaved && (
+            <span className="text-green-400 text-sm flex items-center gap-1 animate-fadeIn">
+              <CheckCircle size={14} /> Konumlar kaydedildi
+            </span>
+          )}
           {hasChanges && (
             <span className="text-yellow-500 text-sm">• Kaydedilmemiş değişiklikler</span>
           )}
           <button
             onClick={handleSave}
-            disabled={saving || !hasChanges}
+            disabled={saving}
             className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            <Save size={18} />
+            {saving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
             {saving ? 'Kaydediliyor...' : 'Kaydet'}
           </button>
         </div>
@@ -447,9 +542,9 @@ export default function StoryFlowEditor({ story, initialScenes, initialChoices }
       <div className="flex-shrink-0 bg-gray-800/50 border-b border-gray-700 px-4 py-2">
         <p className="text-gray-400 text-sm">
           <span className="text-purple-400 font-medium">İpucu:</span> Sahneleri bağlamak için alt noktadan üst noktaya sürükleyin. 
-          <span className="text-green-400 mx-1">●</span>Yeşil = Normal akış (seçimsiz) 
+          <span className="text-green-400 mx-1">●</span>Yeşil = Normal akış 
           <span className="text-purple-400 mx-1">●</span>Mor = Seçim/Karar. 
-          Bağlantıya tıklayarak silin. Sağ tıklayarak başlangıç sahnesini ayarlayın.
+          Bağlantıya tıklayarak silin. <span className="text-blue-400">Sahne konumları otomatik kaydedilir.</span>
         </p>
       </div>
 
@@ -458,7 +553,7 @@ export default function StoryFlowEditor({ story, initialScenes, initialChoices }
         <ReactFlow
           nodes={nodes}
           edges={edges}
-          onNodesChange={onNodesChange}
+          onNodesChange={handleNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onEdgeClick={onEdgeClick}
@@ -531,4 +626,3 @@ export default function StoryFlowEditor({ story, initialScenes, initialChoices }
     </div>
   )
 }
-

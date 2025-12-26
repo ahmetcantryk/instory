@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { Sparkles, ArrowLeft, Loader2 } from 'lucide-react'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -35,46 +36,91 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
-      <div className="bg-white p-8 rounded shadow w-full max-w-sm">
-        <Link href="/" className="text-gray-500 text-sm mb-4 block hover:underline">
-          ← Ana Sayfa
+    <div className="min-h-screen flex flex-col bg-[#FAFAFA] safe-area-top safe-area-bottom">
+      {/* Header */}
+      <header className="flex-none px-4 sm:px-6 py-4 sm:py-5">
+        <Link href="/" className="inline-flex items-center gap-2 text-gray-500 hover:text-gray-900 transition-colors">
+          <ArrowLeft size={18} />
+          <span className="text-sm font-medium">Ana Sayfa</span>
         </Link>
-        
-        <h1 className="text-xl font-bold text-center mb-6 text-gray-900">Admin Girişi</h1>
+      </header>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            className="w-full px-3 py-2 border rounded text-gray-900 placeholder-gray-500"
-            placeholder="E-posta"
-          />
+      {/* Main content */}
+      <main className="flex-1 flex items-center justify-center px-4 pb-8">
+        <div className="w-full max-w-sm">
+          {/* Logo and Title */}
+          <div className="text-center mb-8">
+            <div className="w-14 h-14 sm:w-16 sm:h-16 bg-black text-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
+              <Sparkles size={28} />
+            </div>
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">Hoş Geldiniz</h1>
+            <p className="text-gray-500 text-sm sm:text-base">Admin paneline giriş yapın</p>
+          </div>
 
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            className="w-full px-3 py-2 border rounded text-gray-900 placeholder-gray-500"
-            placeholder="Şifre"
-          />
+          {/* Login Form */}
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 sm:p-8">
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1.5">
+                  E-posta
+                </label>
+                <input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  autoComplete="email"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent transition-all text-base"
+                  placeholder="ornek@email.com"
+                />
+              </div>
 
-          {error && (
-            <div className="text-red-600 text-sm">{error}</div>
-          )}
+              <div>
+                <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1.5">
+                  Şifre
+                </label>
+                <input
+                  id="password"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  autoComplete="current-password"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent transition-all text-base"
+                  placeholder="••••••••"
+                />
+              </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-2 bg-gray-900 text-white rounded hover:bg-gray-800 disabled:opacity-50"
-          >
-            {loading ? 'Giriş yapılıyor...' : 'Giriş Yap'}
-          </button>
-        </form>
-      </div>
+              {error && (
+                <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl px-4 py-3 animate-fadeIn">
+                  {error}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full py-3.5 bg-black text-white rounded-xl font-medium hover:bg-gray-800 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 text-base"
+              >
+                {loading ? (
+                  <>
+                    <Loader2 size={20} className="animate-spin" />
+                    <span>Giriş yapılıyor...</span>
+                  </>
+                ) : (
+                  'Giriş Yap'
+                )}
+              </button>
+            </form>
+          </div>
+
+          {/* Footer note */}
+          <p className="text-center text-gray-400 text-xs mt-6">
+            Yalnızca yetkili kullanıcılar içindir
+          </p>
+        </div>
+      </main>
     </div>
   )
 }

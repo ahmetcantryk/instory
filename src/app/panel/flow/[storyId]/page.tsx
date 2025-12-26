@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import StoryFlowEditor from './StoryFlowEditor'
-import type { Scene, Choice, Panel } from '@/types/database'
+import type { Scene, Choice, Panel, ScenePosition } from '@/types/database'
 
 interface SceneWithPanels extends Scene {
   panels: Panel[]
@@ -37,6 +37,19 @@ export default async function StoryFlowPage({ params }: { params: Promise<{ stor
     .from('choices')
     .select('*')
 
+  // Load scene positions for the flow editor
+  const sceneIds = scenes?.map(s => s.id) || []
+  let positions: ScenePosition[] = []
+  
+  if (sceneIds.length > 0) {
+    const { data: positionsData } = await supabase
+      .from('scene_positions')
+      .select('*')
+      .in('scene_id', sceneIds)
+    
+    positions = positionsData || []
+  }
+
   if (scenesError || choicesError) {
     console.error('Error fetching data:', scenesError || choicesError)
   }
@@ -55,7 +68,7 @@ export default async function StoryFlowPage({ params }: { params: Promise<{ stor
       story={story} 
       initialScenes={storyScenes} 
       initialChoices={storyChoices}
+      initialPositions={positions}
     />
   )
 }
-
