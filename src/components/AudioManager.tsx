@@ -36,8 +36,6 @@ import type { StoryAudio, AudioType, Scene, Panel } from '@/types/database'
 
 interface LocalAudio extends StoryAudio {
   isNew?: boolean
-  isPlaying?: boolean
-  audioElement?: HTMLAudioElement
 }
 
 interface AudioManagerProps {
@@ -64,6 +62,209 @@ const formatDuration = (ms: number): string => {
   const minutes = Math.floor(seconds / 60)
   const remainingSeconds = seconds % 60
   return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`
+}
+
+// ============================================================================
+// WAVEFORM VOLUME SLIDER COMPONENT
+// ============================================================================
+
+interface WaveformVolumeSliderProps {
+  value: number // 0-1 arası
+  onChange: (value: number) => void
+  barCount?: number
+  className?: string
+  showPercentage?: boolean
+  accentColor?: string
+}
+
+function WaveformVolumeSlider({ 
+  value, 
+  onChange, 
+  barCount = 24, 
+  className = '',
+  showPercentage = true,
+  accentColor = 'bg-blue-500'
+}: WaveformVolumeSliderProps) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [isDragging, setIsDragging] = useState(false)
+  const [hoverValue, setHoverValue] = useState<number | null>(null)
+  
+  // Tüm barlar eşit yükseklikte
+  const barHeights = useMemo(() => {
+    return Array(barCount).fill(1)
+  }, [barCount])
+  
+  const calculateValueFromPosition = useCallback((clientX: number) => {
+    if (!containerRef.current) return value
+    const rect = containerRef.current.getBoundingClientRect()
+    const x = clientX - rect.left
+    const percentage = Math.max(0, Math.min(1, x / rect.width))
+    // Max volume 2.0 (200%)
+    return percentage * 2
+  }, [value])
+  
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    setIsDragging(true)
+    const newValue = calculateValueFromPosition(e.clientX)
+    onChange(newValue)
+  }, [calculateValueFromPosition, onChange])
+  
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!containerRef.current) return
+    
+    const newValue = calculateValueFromPosition(e.clientX)
+    setHoverValue(newValue)
+    
+    if (isDragging) {
+      onChange(newValue)
+    }
+  }, [isDragging, calculateValueFromPosition, onChange])
+  
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false)
+  }, [])
+  
+  const handleMouseLeave = useCallback(() => {
+    setHoverValue(null)
+    if (isDragging) {
+      setIsDragging(false)
+    }
+  }, [isDragging])
+  
+  // Global mouse up listener
+  useEffect(() => {
+    if (isDragging) {
+      const handleGlobalMouseUp = () => setIsDragging(false)
+      window.addEventListener('mouseup', handleGlobalMouseUp)
+      return () => window.removeEventListener('mouseup', handleGlobalMouseUp)
+    }
+  }, [isDragging])
+  
+  // 100% işareti konumu (0-2 aralığında 1 = 50% pozisyon)
+  const hundredPercentPosition = 50 // %
+  
+  // Aktif bar sayısı (value 0-2 aralığında, görsel 0-100% pozisyon)
+  const activePosition = (value / 2) * 100
+  const displayValue = hoverValue !== null ? hoverValue : value
+
+  return (
+    <div className={`${className}`}>
+      {showPercentage && (
+        <div className="flex justify-between items-center mb-2">
+          <span className="text-xs text-gray-400">Ses Seviyesi</span>
+          <span className={`text-sm font-bold ${value > 1 ? 'text-orange-400' : 'text-blue-400'}`}>
+            {Math.round(displayValue * 100)}%
+          </span>
+        </div>
+      )}
+      
+      <div 
+        ref={containerRef}
+        className="relative h-12 flex items-end gap-[2px] cursor-pointer select-none rounded-lg bg-gray-900/50 px-2 py-2"
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseLeave}
+      >
+        {/* 100% işareti - tıklanabilir */}
+        <div 
+          className="absolute top-0 bottom-0 w-[2px] bg-gray-600 z-10 cursor-pointer hover:bg-blue-500 transition-colors"
+          style={{ left: `${hundredPercentPosition}%` }}
+          onClick={(e) => { e.stopPropagation(); onChange(1) }}
+          title="100% olarak ayarla"
+        >
+          <span className="absolute -top-5 left-1/2 -translate-x-1/2 text-[9px] text-gray-400 hover:text-blue-400 cursor-pointer font-medium">100%</span>
+        </div>
+        
+        {/* Barlar */}
+        {barHeights.map((heightRatio, index) => {
+          const barPosition = ((index + 0.5) / barCount) * 100
+          const isActive = barPosition <= activePosition
+          const isHovered = hoverValue !== null && barPosition <= (hoverValue / 2) * 100
+          const isOverHundred = barPosition > hundredPercentPosition
+          
+          return (
+            <div
+              key={index}
+              className={`flex-1 rounded-sm transition-all duration-75 ${
+                isActive 
+                  ? isOverHundred 
+                    ? 'bg-orange-500' 
+                    : accentColor
+                  : isHovered
+                    ? 'bg-gray-500'
+                    : 'bg-gray-700'
+              }`}
+              style={{
+                height: `${heightRatio * 100}%`,
+                opacity: isActive ? 1 : isHovered ? 0.6 : 0.4
+              }}
+            />
+          )
+        })}
+        
+        {/* Hover değer göstergesi */}
+        {hoverValue !== null && !isDragging && (
+          <div 
+            className="absolute -top-6 px-1.5 py-0.5 bg-gray-800 rounded text-[10px] text-white pointer-events-none whitespace-nowrap"
+            style={{ left: `${(hoverValue / 2) * 100}%`, transform: 'translateX(-50%)' }}
+          >
+            {Math.round(hoverValue * 100)}%
+          </div>
+        )}
+      </div>
+      
+      {/* Quick preset buttons */}
+      <div className="flex justify-between items-center mt-2 gap-1">
+        <button 
+          onClick={() => onChange(0)}
+          className={`flex-1 text-[10px] py-1 rounded transition-colors font-medium ${
+            value === 0 ? 'bg-red-600 text-white' : 'text-gray-400 hover:text-red-400 hover:bg-gray-800'
+          }`}
+          title="Sesi kapat"
+        >
+          0%
+        </button>
+        <button 
+          onClick={() => onChange(0.5)}
+          className={`flex-1 text-[10px] py-1 rounded transition-colors font-medium ${
+            value === 0.5 ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-blue-400 hover:bg-gray-800'
+          }`}
+          title="Yarı ses"
+        >
+          50%
+        </button>
+        <button 
+          onClick={() => onChange(1)}
+          className={`flex-1 text-[10px] py-1 rounded transition-colors font-medium ${
+            value === 1 ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-blue-400 hover:bg-gray-800'
+          }`}
+          title="Normal ses"
+        >
+          100%
+        </button>
+        <button 
+          onClick={() => onChange(1.5)}
+          className={`flex-1 text-[10px] py-1 rounded transition-colors font-medium ${
+            value === 1.5 ? 'bg-orange-600 text-white' : 'text-gray-400 hover:text-orange-400 hover:bg-gray-800'
+          }`}
+          title="Yüksek ses"
+        >
+          150%
+        </button>
+        <button 
+          onClick={() => onChange(2)}
+          className={`flex-1 text-[10px] py-1 rounded transition-colors font-medium ${
+            value === 2 ? 'bg-orange-600 text-white' : 'text-gray-400 hover:text-orange-400 hover:bg-gray-800'
+          }`}
+          title="Maksimum ses"
+        >
+          200%
+        </button>
+      </div>
+    </div>
+  )
 }
 
 const generateId = (): string => `audio_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
@@ -95,6 +296,11 @@ export default function AudioManager({ storyId, scenes, onClose }: AudioManagerP
   
   // Show library picker
   const [showLibraryPicker, setShowLibraryPicker] = useState(false)
+  
+  // ========== AUDIO PLAYER SYSTEM (REF-BASED) ==========
+  // Audio elements are stored in a ref Map, not in state
+  const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map())
+  const [playingAudioId, setPlayingAudioId] = useState<string | null>(null)
   
   // Sorted scenes
   const sortedScenes = useMemo(() => 
@@ -145,13 +351,13 @@ export default function AudioManager({ storyId, scenes, onClose }: AudioManagerP
 
   // Cleanup audio elements on unmount
   useEffect(() => {
+    const elementsMap = audioElementsRef.current
     return () => {
-      audios.forEach(audio => {
-        if (audio.audioElement) {
-          audio.audioElement.pause()
-          audio.audioElement.src = ''
-        }
+      elementsMap.forEach((el) => {
+        el.pause()
+        el.src = ''
       })
+      elementsMap.clear()
     }
   }, [])
 
@@ -185,73 +391,94 @@ export default function AudioManager({ storyId, scenes, onClose }: AudioManagerP
     })
   }, [audios])
 
-  // Toggle play/pause
-  const togglePlay = useCallback((audioId: string) => {
-    setAudios(prev => {
-      const newAudios = prev.map(audio => {
-        if (audio.id === audioId) {
-          if (audio.isPlaying) {
-            if (audio.audioElement) {
-              audio.audioElement.pause()
-            }
-            return { ...audio, isPlaying: false }
-          } else {
-            // Stop all other playing audios
-            prev.forEach(a => {
-              if (a.id !== audioId && a.audioElement && a.isPlaying) {
-                a.audioElement.pause()
-              }
-            })
-            
-            // Create or reuse audio element
-            let el = audio.audioElement
-            if (!el) {
-              el = new Audio(audio.audio_url)
-              el.loop = audio.loop
-            }
-            el.volume = audio.volume
-            el.currentTime = 0
-            
-            el.play().then(() => {
-              // Success
-            }).catch(err => {
-              console.warn('Play failed:', err)
-              setAudios(p => p.map(a => a.id === audioId ? { ...a, isPlaying: false } : a))
-            })
-            
-            el.onended = () => {
-              if (!audio.loop) {
-                setAudios(p => p.map(a => a.id === audioId ? { ...a, isPlaying: false } : a))
-              }
-            }
-            
-            return { ...audio, audioElement: el, isPlaying: true }
-          }
-        }
-        return { ...audio, isPlaying: false }
-      })
-      return newAudios
-    })
-  }, [])
-
-  // Update audio properties
-  const updateAudio = useCallback((audioId: string, updates: Partial<LocalAudio>) => {
-    setAudios(prev => prev.map(audio => {
-      if (audio.id !== audioId) return audio
+  // Get or create audio element from ref
+  const getAudioElement = useCallback((audio: LocalAudio): HTMLAudioElement => {
+    let el = audioElementsRef.current.get(audio.id)
+    if (!el) {
+      el = new Audio(audio.audio_url)
+      el.loop = audio.loop
+      el.volume = Math.max(0, Math.min(1, audio.volume))
       
-      const updated = { ...audio, ...updates }
-      
-      if (audio.audioElement) {
-        if (updates.volume !== undefined) {
-          audio.audioElement.volume = updates.volume
-        }
-        if (updates.loop !== undefined) {
-          audio.audioElement.loop = updates.loop
+      el.onended = () => {
+        if (!audio.loop) {
+          setPlayingAudioId(null)
         }
       }
       
-      return updated
-    }))
+      audioElementsRef.current.set(audio.id, el)
+    }
+    return el
+  }, [])
+
+  // Stop all playing audio
+  const stopAllAudio = useCallback(() => {
+    audioElementsRef.current.forEach((el) => {
+      el.pause()
+      el.currentTime = 0
+    })
+    setPlayingAudioId(null)
+  }, [])
+
+  // Toggle play/pause - CLEAN VERSION
+  const togglePlay = useCallback((audioId: string) => {
+    const audio = audios.find(a => a.id === audioId)
+    if (!audio) return
+
+    // If this audio is currently playing, pause it
+    if (playingAudioId === audioId) {
+      const el = audioElementsRef.current.get(audioId)
+      if (el) {
+        el.pause()
+      }
+      setPlayingAudioId(null)
+      return
+    }
+
+    // Stop any currently playing audio first
+    if (playingAudioId) {
+      const currentEl = audioElementsRef.current.get(playingAudioId)
+      if (currentEl) {
+        currentEl.pause()
+        currentEl.currentTime = 0
+      }
+    }
+
+    // Play the new audio
+    const el = getAudioElement(audio)
+    const appliedVolume = Math.max(0, Math.min(1, audio.volume))
+    el.volume = appliedVolume
+    el.loop = audio.loop
+    el.currentTime = 0
+    
+    console.log(`[AudioManager] Playing: ${audio.audio_name}, saved: ${audio.volume} (${Math.round(audio.volume * 100)}%), applied: ${appliedVolume}`)
+    
+    el.play()
+      .then(() => {
+        setPlayingAudioId(audioId)
+      })
+      .catch(err => {
+        console.warn('Play failed:', err)
+        setPlayingAudioId(null)
+      })
+  }, [audios, playingAudioId, getAudioElement])
+
+  // Update audio properties
+  const updateAudio = useCallback((audioId: string, updates: Partial<LocalAudio>) => {
+    // Update the audio element properties immediately (from ref)
+    const el = audioElementsRef.current.get(audioId)
+    if (el) {
+      if (updates.volume !== undefined) {
+        el.volume = Math.max(0, Math.min(1, updates.volume))
+      }
+      if (updates.loop !== undefined) {
+        el.loop = updates.loop
+      }
+    }
+    
+    // Update state
+    setAudios(prev => prev.map(audio => 
+      audio.id === audioId ? { ...audio, ...updates } : audio
+    ))
     setHasChanges(true)
     setSaveStatus('idle')
   }, [])
@@ -263,8 +490,16 @@ export default function AudioManager({ storyId, scenes, onClose }: AudioManagerP
 
     if (!confirm('Bu sesi silmek istediğinize emin misiniz?')) return
 
-    if (audio.audioElement) {
-      audio.audioElement.pause()
+    // Stop and remove audio element from ref
+    const el = audioElementsRef.current.get(audioId)
+    if (el) {
+      el.pause()
+      el.src = ''
+      audioElementsRef.current.delete(audioId)
+    }
+    
+    if (playingAudioId === audioId) {
+      setPlayingAudioId(null)
     }
 
     if (!audio.isNew) {
@@ -576,6 +811,7 @@ export default function AudioManager({ storyId, scenes, onClose }: AudioManagerP
                     key={audio.id}
                     audio={audio}
                     isSelected={selectedAudioId === audio.id}
+                    isPlaying={playingAudioId === audio.id}
                     onSelect={() => setSelectedAudioId(audio.id)}
                     onTogglePlay={() => togglePlay(audio.id)}
                     onDelete={() => deleteAudio(audio.id)}
@@ -598,6 +834,7 @@ export default function AudioManager({ storyId, scenes, onClose }: AudioManagerP
                     key={audio.id}
                     audio={audio}
                     isSelected={selectedAudioId === audio.id}
+                    isPlaying={playingAudioId === audio.id}
                     onSelect={() => setSelectedAudioId(audio.id)}
                     onTogglePlay={() => togglePlay(audio.id)}
                     onDelete={() => deleteAudio(audio.id)}
@@ -620,6 +857,7 @@ export default function AudioManager({ storyId, scenes, onClose }: AudioManagerP
                     key={audio.id}
                     audio={audio}
                     isSelected={selectedAudioId === audio.id}
+                    isPlaying={playingAudioId === audio.id}
                     onSelect={() => setSelectedAudioId(audio.id)}
                     onTogglePlay={() => togglePlay(audio.id)}
                     onDelete={() => deleteAudio(audio.id)}
@@ -886,41 +1124,13 @@ export default function AudioManager({ storyId, scenes, onClose }: AudioManagerP
               </div>
             </div>
 
-            {/* Audio Type */}
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Ses Tipi</label>
-              <div className="grid grid-cols-2 gap-1">
-                {AUDIO_TYPES.map(({ type, icon: Icon, label, color }) => (
-                  <button
-                    key={type}
-                    onClick={() => updateAudio(selectedAudio.id, { audio_type: type })}
-                    className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors ${
-                      selectedAudio.audio_type === type 
-                        ? `${color} text-white` 
-                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                    }`}
-                  >
-                    <Icon size={12} />
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Volume */}
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">
-                Ses Seviyesi: {Math.round(selectedAudio.volume * 100)}%
-              </label>
-              <input
-                type="range"
-                min="0"
-                max="200"
-                value={selectedAudio.volume * 100}
-                onChange={(e) => updateAudio(selectedAudio.id, { volume: Number(e.target.value) / 100 })}
-                className="w-full h-2 bg-gray-700 rounded appearance-none cursor-pointer accent-blue-500"
-              />
-            </div>
+            {/* Volume - Modern Waveform Slider */}
+            <WaveformVolumeSlider
+              value={selectedAudio.volume}
+              onChange={(vol) => updateAudio(selectedAudio.id, { volume: vol })}
+              barCount={28}
+              accentColor="bg-blue-500"
+            />
 
             {/* Timing */}
             <div className="space-y-2">
@@ -1048,14 +1258,18 @@ export default function AudioManager({ storyId, scenes, onClose }: AudioManagerP
 interface AudioItemProps {
   audio: LocalAudio
   isSelected: boolean
+  isPlaying: boolean
   onSelect: () => void
   onTogglePlay: () => void
   onDelete: () => void
 }
 
-function AudioItem({ audio, isSelected, onSelect, onTogglePlay, onDelete }: AudioItemProps) {
+function AudioItem({ audio, isSelected, isPlaying, onSelect, onTogglePlay, onDelete }: AudioItemProps) {
   const typeInfo = AUDIO_TYPES.find(t => t.type === audio.audio_type) || AUDIO_TYPES[0]
-  const Icon = typeInfo.icon
+
+  // Mini waveform bar gösterimi - eşit yükseklik
+  const volumePercent = Math.min(audio.volume, 2) / 2 * 100
+  const barCount = 8
 
   return (
     <div 
@@ -1067,10 +1281,10 @@ function AudioItem({ audio, isSelected, onSelect, onTogglePlay, onDelete }: Audi
       <button
         onClick={(e) => { e.stopPropagation(); onTogglePlay() }}
         className={`w-8 h-8 rounded flex items-center justify-center flex-shrink-0 transition-colors ${
-          audio.isPlaying ? 'bg-blue-600' : typeInfo.color
+          isPlaying ? 'bg-green-600 animate-pulse' : typeInfo.color
         }`}
       >
-        {audio.isPlaying ? <Pause size={14} className="text-white" /> : <Play size={14} className="text-white ml-0.5" />}
+        {isPlaying ? <Pause size={14} className="text-white" /> : <Play size={14} className="text-white ml-0.5" />}
       </button>
       
       <div className="flex-1 min-w-0">
@@ -1082,6 +1296,23 @@ function AudioItem({ audio, isSelected, onSelect, onTogglePlay, onDelete }: Audi
         <div className="text-gray-500 text-[10px]">
           {audio.duration_ms ? formatDuration(audio.duration_ms) : '--:--'} • {Math.round(audio.volume * 100)}%
         </div>
+      </div>
+
+      {/* Mini Volume Bar Indicator - Eşit Yükseklik */}
+      <div className="flex items-end h-4 gap-[1px] mr-1">
+        {Array.from({ length: barCount }).map((_, idx) => {
+          const isActive = ((idx + 1) / barCount) * 100 <= volumePercent
+          return (
+            <div
+              key={idx}
+              className={`w-[3px] h-full rounded-sm transition-colors ${
+                isActive 
+                  ? audio.volume > 1 ? 'bg-orange-400' : 'bg-blue-400'
+                  : 'bg-gray-600'
+              }`}
+            />
+          )
+        })}
       </div>
 
       <button

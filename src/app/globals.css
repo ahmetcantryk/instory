@@ -32,6 +32,24 @@
   --font-mono: var(--font-geist-mono);
 }
 
+/* Comic book style utilities */
+.border-3 {
+  border-width: 3px;
+}
+
+/* Comic shadow utility */
+.shadow-comic {
+  box-shadow: 6px 6px 0px 0px rgba(0, 0, 0, 1);
+}
+
+.shadow-comic-sm {
+  box-shadow: 3px 3px 0px 0px rgba(0, 0, 0, 1);
+}
+
+.shadow-comic-lg {
+  box-shadow: 10px 10px 0px 0px rgba(0, 0, 0, 1);
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     --background: #0a0a0a;
@@ -54,9 +72,65 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans), system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 16px; /* Base font size - prevents iOS zoom on input focus */
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
+}
+
+/* Responsive Typography - prevents font explosion on mobile */
+h1, .text-4xl, .text-5xl, .text-6xl {
+  font-size: clamp(1.5rem, 5vw, 3rem) !important;
+}
+
+h2, .text-3xl {
+  font-size: clamp(1.25rem, 4vw, 2rem) !important;
+}
+
+h3, .text-2xl {
+  font-size: clamp(1.125rem, 3vw, 1.5rem) !important;
+}
+
+h4, .text-xl {
+  font-size: clamp(1rem, 2.5vw, 1.25rem) !important;
+}
+
+/* Ensure small text doesn't get too small on mobile */
+.text-xs {
+  font-size: max(0.75rem, 11px) !important;
+}
+
+.text-sm {
+  font-size: max(0.875rem, 13px) !important;
+}
+
+/* Mobile-specific font adjustments */
+@media (max-width: 640px) {
+  /* Prevent text from being too large on small screens */
+  .text-4xl, .text-5xl, .text-6xl {
+    font-size: 1.75rem !important;
+    line-height: 1.2 !important;
+  }
+  
+  .text-3xl {
+    font-size: 1.5rem !important;
+    line-height: 1.25 !important;
+  }
+  
+  .text-2xl {
+    font-size: 1.25rem !important;
+    line-height: 1.3 !important;
+  }
+  
+  .text-xl {
+    font-size: 1.125rem !important;
+    line-height: 1.4 !important;
+  }
+  
+  .text-lg {
+    font-size: 1rem !important;
+  }
 }
 
 /* Mobile optimizations */
@@ -64,20 +138,32 @@ body {
   body {
     overscroll-behavior: none;
   }
+  
+  /* Prevent iOS zoom on input focus - inputs must be at least 16px */
+  input, 
+  textarea, 
+  select {
+    font-size: 16px !important;
+  }
+  
+  /* Smaller inputs with explicit font sizing */
+  input[type="number"],
+  input.text-sm,
+  textarea.text-sm,
+  select.text-sm {
+    font-size: 16px !important;
+  }
 }
 
-/* Touch-friendly tap targets */
-button, 
-a, 
-[role="button"] {
+/* Touch-friendly tap targets - only for standalone interactive elements */
+/* NOT applied globally to prevent layout issues */
+.touch-target {
   min-height: 44px;
   min-width: 44px;
 }
 
 @media (min-width: 768px) {
-  button, 
-  a, 
-  [role="button"] {
+  .touch-target {
     min-height: auto;
     min-width: auto;
   }
@@ -165,6 +251,56 @@ a,
   50% { opacity: 0.5; }
 }
 
+/* Comic Book Style Animations */
+@keyframes bounceIn {
+  0% { 
+    opacity: 0; 
+    transform: scale(0.3) rotate(-10deg); 
+  }
+  50% { 
+    transform: scale(1.1) rotate(2deg); 
+  }
+  70% { 
+    transform: scale(0.95) rotate(-1deg); 
+  }
+  100% { 
+    opacity: 1; 
+    transform: scale(1) rotate(-3deg); 
+  }
+}
+
+@keyframes slideInLeft {
+  0% { 
+    opacity: 0; 
+    transform: translateX(-50px) skewX(-5deg); 
+  }
+  60% {
+    transform: translateX(10px) skewX(2deg);
+  }
+  100% { 
+    opacity: 1; 
+    transform: translateX(0) skewX(0); 
+  }
+}
+
+@keyframes comicPop {
+  0% { 
+    transform: scale(0) rotate(-20deg); 
+  }
+  50% { 
+    transform: scale(1.2) rotate(5deg); 
+  }
+  100% { 
+    transform: scale(1) rotate(-3deg); 
+  }
+}
+
+@keyframes comicShake {
+  0%, 100% { transform: translateX(0); }
+  10%, 30%, 50%, 70%, 90% { transform: translateX(-2px); }
+  20%, 40%, 60%, 80% { transform: translateX(2px); }
+}
+
 .animate-fadeIn {
   animation: fadeIn 0.3s ease-out forwards;
 }
@@ -179,6 +315,22 @@ a,
 
 .animate-pulse {
   animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.animate-bounceIn {
+  animation: bounceIn 0.6s cubic-bezier(0.68, -0.55, 0.265, 1.55) forwards;
+}
+
+.animate-slideInLeft {
+  animation: slideInLeft 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+}
+
+.animate-comicPop {
+  animation: comicPop 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55) forwards;
+}
+
+.animate-comicShake {
+  animation: comicShake 0.5s ease-in-out;
 }
 
 /* Story card hover effects (desktop only) */
@@ -307,6 +459,47 @@ a,
 :focus-visible {
   outline: 2px solid var(--reader-accent);
   outline-offset: 2px;
+}
+
+/* Prevent text overflow on mobile */
+.break-words {
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+/* Mobile-safe text container */
+.mobile-text-safe {
+  max-width: 100%;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  hyphens: auto;
+}
+
+/* Ensure buttons don't expand text */
+button {
+  font-size: inherit;
+  line-height: inherit;
+}
+
+/* Reset button min sizes that might cause issues */
+button.btn-sm,
+a.btn-sm,
+.btn-icon {
+  min-height: unset;
+  min-width: unset;
+}
+
+/* Modal and overlay text should not scale with viewport */
+.modal-text,
+.overlay-text {
+  font-size: 14px !important;
+}
+
+@media (max-width: 640px) {
+  .modal-text,
+  .overlay-text {
+    font-size: 13px !important;
+  }
 }
 
 /* Print styles */

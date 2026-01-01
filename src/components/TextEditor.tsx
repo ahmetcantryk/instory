@@ -136,12 +136,92 @@ const getBackgroundStyle = (style: TextStyle, bubbleType: string): string => {
   return hexToRgba(bgColor, opacity)
 }
 
+// Font seçenekleri - Google Fonts ve sistem fontları
+// Google Font isimleri tırnak içinde olmalı
 const FONT_OPTIONS = [
-  { value: 'Comic Sans MS, cursive, sans-serif', label: 'Comic Sans' },
-  { value: 'Arial, sans-serif', label: 'Arial' },
-  { value: '"Segoe UI", sans-serif', label: 'Segoe UI' },
-  { value: 'Georgia, serif', label: 'Georgia' },
+  // System fonts (her cihazda çalışır)
+  { value: 'Arial, Helvetica, sans-serif', label: 'Arial', isSystem: true },
+  { value: 'Georgia, "Times New Roman", serif', label: 'Georgia', isSystem: true },
+  { value: 'Verdana, Geneva, sans-serif', label: 'Verdana', isSystem: true },
+  { value: 'Impact, Haettenschweiler, sans-serif', label: 'Impact', isSystem: true },
+  { value: '"Trebuchet MS", Helvetica, sans-serif', label: 'Trebuchet MS', isSystem: true },
+  
+  // Google Fonts - Comic/Manga style
+  { value: '"Bangers", Impact, cursive', label: 'Bangers', googleFont: 'Bangers' },
+  { value: '"Permanent Marker", cursive', label: 'Permanent Marker', googleFont: 'Permanent+Marker' },
+  { value: '"Comic Neue", "Comic Sans MS", cursive', label: 'Comic Neue', googleFont: 'Comic+Neue:wght@400;700' },
+  { value: '"Luckiest Guy", Impact, cursive', label: 'Luckiest Guy', googleFont: 'Luckiest+Guy' },
+  { value: '"Fredoka", sans-serif', label: 'Fredoka', googleFont: 'Fredoka:wght@400;600;700' },
+  { value: '"Bubblegum Sans", cursive', label: 'Bubblegum Sans', googleFont: 'Bubblegum+Sans' },
+  
+  // Google Fonts - Clean/Modern
+  { value: '"Roboto", sans-serif', label: 'Roboto', googleFont: 'Roboto:wght@400;500;700' },
+  { value: '"Open Sans", sans-serif', label: 'Open Sans', googleFont: 'Open+Sans:wght@400;600;700' },
+  { value: '"Poppins", sans-serif', label: 'Poppins', googleFont: 'Poppins:wght@400;600;700' },
+  { value: '"Nunito", sans-serif', label: 'Nunito', googleFont: 'Nunito:wght@400;600;700' },
+  
+  // Google Fonts - Display/Decorative
+  { value: '"Oswald", sans-serif', label: 'Oswald', googleFont: 'Oswald:wght@400;600;700' },
+  { value: '"Russo One", sans-serif', label: 'Russo One', googleFont: 'Russo+One' },
+  { value: '"Anton", sans-serif', label: 'Anton', googleFont: 'Anton' },
+  { value: '"Creepster", cursive', label: 'Creepster', googleFont: 'Creepster' },
+  
+  // Google Fonts - Japanese/Manga style
+  { value: '"Noto Sans JP", sans-serif', label: 'Noto Sans JP', googleFont: 'Noto+Sans+JP:wght@400;700' },
+  { value: '"Kosugi Maru", sans-serif', label: 'Kosugi Maru', googleFont: 'Kosugi+Maru' },
 ]
+
+// Google Font URL'ini oluştur
+const getGoogleFontUrl = (fonts: string[]): string => {
+  if (fonts.length === 0) return ''
+  const families = fonts.join('&family=')
+  return `https://fonts.googleapis.com/css2?family=${families}&display=swap`
+}
+
+// Font listesinden Google Font'ları çıkar
+const extractGoogleFonts = (fontFamily: string): string | null => {
+  const option = FONT_OPTIONS.find(f => f.value === fontFamily)
+  return option?.googleFont || null
+}
+
+// Yüklenmiş fontları takip et (global)
+const loadedFontsSet = new Set<string>()
+
+// Tek bir Google Font yükle
+const loadSingleGoogleFont = (fontValue: string): void => {
+  const option = FONT_OPTIONS.find(f => f.value === fontValue)
+  if (!option?.googleFont || loadedFontsSet.has(option.googleFont)) return
+  
+  loadedFontsSet.add(option.googleFont)
+  
+  const link = document.createElement('link')
+  link.href = `https://fonts.googleapis.com/css2?family=${option.googleFont}&display=swap`
+  link.rel = 'stylesheet'
+  document.head.appendChild(link)
+}
+
+// Tüm Google Fontlarını preload et
+const preloadAllGoogleFonts = (): void => {
+  const googleFonts = FONT_OPTIONS
+    .filter(f => f.googleFont)
+    .map(f => f.googleFont)
+  
+  if (googleFonts.length === 0) return
+  
+  // Toplu yükleme için tek bir link
+  const families = googleFonts.join('&family=')
+  const link = document.createElement('link')
+  link.href = `https://fonts.googleapis.com/css2?family=${families}&display=swap`
+  link.rel = 'stylesheet'
+  link.id = 'google-fonts-preload'
+  
+  // Zaten yüklenmişse skip
+  if (!document.getElementById('google-fonts-preload')) {
+    document.head.appendChild(link)
+  }
+  
+  googleFonts.forEach(f => loadedFontsSet.add(f!))
+}
 
 const generateId = (): string => `text_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
 
@@ -175,6 +255,11 @@ export default function TextEditor({
   const containerRef = useRef<HTMLDivElement>(null)
 
   const selectedText = texts.find(t => t.id === selectedTextId)
+
+  // Tüm fontları sayfa yüklendiğinde preload et
+  useEffect(() => {
+    preloadAllGoogleFonts()
+  }, [])
 
   // Get effective values for a specific language (with override support)
   const getEffectiveValues = useCallback((text: LocalPanelText, lang: SupportedLanguage) => {

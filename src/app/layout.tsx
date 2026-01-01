@@ -31,9 +31,11 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  minimumScale: 1,
   maximumScale: 1,
   userScalable: false,
   viewportFit: "cover",
+  interactiveWidget: "resizes-content",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#FAFAFA" },
     { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
@@ -48,11 +50,23 @@ export default function RootLayout({
   return (
     <html lang="tr" className="antialiased">
       <head>
+        {/* Google Fonts preconnect - tüm cihazlarda font yüklemeyi hızlandırır */}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        
+        {/* En sık kullanılan fontları preload et */}
+        <link 
+          rel="preload" 
+          href="https://fonts.googleapis.com/css2?family=Bangers&family=Comic+Neue:wght@400;700&family=Permanent+Marker&family=Poppins:wght@400;600;700&family=Noto+Sans+JP:wght@400;700&display=swap" 
+          as="style"
+        />
+        <link 
+          rel="stylesheet" 
+          href="https://fonts.googleapis.com/css2?family=Bangers&family=Comic+Neue:wght@400;700&family=Permanent+Marker&family=Poppins:wght@400;600;700&family=Noto+Sans+JP:wght@400;700&display=swap"
+        />
       </head>
       <body
-        className={`${geistSans.variable} ${geistMono.variable}`}
+        className={`${geistSans.variable} ${geistMono.variable} text-base`}
       >
         {children}
       </body>

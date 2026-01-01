@@ -45,6 +45,71 @@ const LANGUAGE_NAMES: Record<SupportedLanguage, string> = {
   he: 'עברית'
 }
 
+// ============================================================================
+// GOOGLE FONTS LOADER - Mobil ve web için fontları dinamik yükler
+// ============================================================================
+
+// Font mapping - fontFamily değerinden Google Font ismini çıkar
+const GOOGLE_FONT_MAP: Record<string, string> = {
+  '"Bangers", Impact, cursive': 'Bangers',
+  '"Permanent Marker", cursive': 'Permanent+Marker',
+  '"Comic Neue", "Comic Sans MS", cursive': 'Comic+Neue:wght@400;700',
+  '"Luckiest Guy", Impact, cursive': 'Luckiest+Guy',
+  '"Fredoka", sans-serif': 'Fredoka:wght@400;600;700',
+  '"Bubblegum Sans", cursive': 'Bubblegum+Sans',
+  '"Roboto", sans-serif': 'Roboto:wght@400;500;700',
+  '"Open Sans", sans-serif': 'Open+Sans:wght@400;600;700',
+  '"Poppins", sans-serif': 'Poppins:wght@400;600;700',
+  '"Nunito", sans-serif': 'Nunito:wght@400;600;700',
+  '"Oswald", sans-serif': 'Oswald:wght@400;600;700',
+  '"Russo One", sans-serif': 'Russo+One',
+  '"Anton", sans-serif': 'Anton',
+  '"Creepster", cursive': 'Creepster',
+  '"Noto Sans JP", sans-serif': 'Noto+Sans+JP:wght@400;700',
+  '"Kosugi Maru", sans-serif': 'Kosugi+Maru',
+}
+
+// Yüklenmiş fontları takip et
+const loadedFonts = new Set<string>()
+
+// Google Font'u yükle
+const loadGoogleFont = (fontFamily: string): void => {
+  const googleFontName = GOOGLE_FONT_MAP[fontFamily]
+  if (!googleFontName || loadedFonts.has(googleFontName)) return
+  
+  loadedFonts.add(googleFontName)
+  
+  // Link elementi oluştur
+  const link = document.createElement('link')
+  link.href = `https://fonts.googleapis.com/css2?family=${googleFontName}&display=swap`
+  link.rel = 'stylesheet'
+  link.setAttribute('data-font', googleFontName)
+  
+  // Head'e ekle
+  document.head.appendChild(link)
+}
+
+// Tüm text overlay fontlarını preload et
+const preloadTextFonts = (texts: PanelText[]): void => {
+  const fontFamilies = new Set<string>()
+  
+  texts.forEach(text => {
+    // Ana stil
+    if (text.style?.fontFamily) {
+      fontFamilies.add(text.style.fontFamily)
+    }
+    // Override stiller
+    text.contents?.forEach(content => {
+      const override = content.style_override as Record<string, unknown> | null
+      if (override?.fontFamily && typeof override.fontFamily === 'string') {
+        fontFamilies.add(override.fontFamily)
+      }
+    })
+  })
+  
+  fontFamilies.forEach(fontFamily => loadGoogleFont(fontFamily))
+}
+
 // Preload images utility
 const preloadImage = (src: string): Promise<HTMLImageElement> => {
   return new Promise((resolve, reject) => {
@@ -202,7 +267,6 @@ function TextOverlayRenderer({ texts, language, scale, imageWidth, imageHeight }
               textAlign: mergedStyle.textAlign as React.CSSProperties['textAlign'] || 'center',
               lineHeight: mergedStyle.lineHeight || 1.3,
               letterSpacing: mergedStyle.letterSpacing ? mergedStyle.letterSpacing * scale : undefined,
-              textTransform: bubbleType === 'shout' ? 'uppercase' : undefined,
               
               // Kutu stili
               padding: `${paddingY}px ${paddingX}px`,
@@ -235,7 +299,9 @@ function TextOverlayRenderer({ texts, language, scale, imageWidth, imageHeight }
               className="animate-fadeIn"
             >
               {text.split('\n').map((line, i) => (
-                <div key={i}>{line}</div>
+                <div key={i}>
+                  {bubbleType === 'shout' ? line.toLocaleUpperCase('tr-TR') : line}
+                </div>
               ))}
             </div>
           </div>
@@ -275,6 +341,7 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [loadedImages, setLoadedImages] = useState<Set<string>>(new Set())
   const [isLoading, setIsLoading] = useState(true)
+  const [isSceneTransitioning, setIsSceneTransitioning] = useState(false)
   
   // Audio state
   const [isMuted, setIsMuted] = useState(false)
@@ -345,6 +412,22 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
       window.removeEventListener('orientationchange', checkDevice)
     }
   }, [])
+  
+  // Font preloading - tüm text overlay fontlarını önceden yükle
+  useEffect(() => {
+    const allTexts: PanelText[] = []
+    story.scenes?.forEach(scene => {
+      scene.panels?.forEach(panel => {
+        if (panel.texts) {
+          allTexts.push(...panel.texts)
+        }
+      })
+    })
+    
+    if (allTexts.length > 0) {
+      preloadTextFonts(allTexts)
+    }
+  }, [story.scenes])
 
   // Get all unique image URLs for preloading
   const allImageUrls = useMemo(() => {
@@ -413,8 +496,7 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
   // Check if we're at a decision point (last panel with multiple choices)
   const isAtDecisionPoint = isAtLastPanel && sceneChoices.length > 0
 
-  // Can go back?
-  const canGoBack = currentPanelIndex > 0 || history.length > 0
+  // Geri gitme devre dışı - sadece ileri gitme var
 
   // Auto fullscreen on mount (only for non-mobile devices)
   useEffect(() => {
@@ -438,14 +520,47 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
     setRevealedPanels(new Set([0]))
   }, [currentSceneId])
 
+  // Sync revealed panels when switching to panel-to-panel mode
+  // Focus mode'dan geçerken, mevcut panel'e kadar tüm panelleri revealed yap
+  useEffect(() => {
+    if (readingMode === 'panel-to-panel') {
+      setRevealedPanels(prev => {
+        const newSet = new Set(prev)
+        for (let i = 0; i <= currentPanelIndex; i++) {
+          newSet.add(i)
+        }
+        return newSet
+      })
+    }
+  }, [readingMode, currentPanelIndex])
+
   // ==================== AUDIO MANAGEMENT ====================
+
+  // Volume hesaplama - 0-1 arasında clamp yapar
+  // audioVolume: 0-2 (0-200%), masterVolume: 0-1, isMuted: boolean
+  const calculateVolume = useCallback((audioVolume: number, muted: boolean, master: number): number => {
+    if (muted) return 0
+    // audioVolume 0-2 aralığında, HTML5 Audio 0-1 kabul ediyor
+    // Eğer audioVolume > 1 ise, max 1'e clamp yapıyoruz
+    const calculatedVolume = audioVolume * master
+    return Math.max(0, Math.min(1, calculatedVolume))
+  }, [])
 
   // Audio fade utility
   const fadeAudio = useCallback((element: HTMLAudioElement, targetVolume: number, duration: number, onComplete?: () => void) => {
+    // targetVolume'u clamp et
+    const clampedTarget = Math.max(0, Math.min(1, targetVolume))
+    
+    if (duration <= 0) {
+      element.volume = clampedTarget
+      onComplete?.()
+      return
+    }
+    
     const steps = 20
     const stepDuration = duration / steps
     const currentVolume = element.volume
-    const volumeDiff = targetVolume - currentVolume
+    const volumeDiff = clampedTarget - currentVolume
     const volumeStep = volumeDiff / steps
     let currentStep = 0
     
@@ -467,7 +582,12 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
     
     const element = new Audio(audioData.audio_url)
     element.loop = audioData.loop
-    element.volume = isMuted ? 0 : audioData.volume * masterVolume
+    
+    // Kayıtlı volume değerini clamp ederek uygula
+    const initialVolume = calculateVolume(audioData.volume, isMuted, masterVolume)
+    element.volume = initialVolume
+    
+    console.log(`[StoryReader] Starting: ${audioData.audio_name}, saved: ${audioData.volume} (${Math.round(audioData.volume * 100)}%), masterVolume: ${masterVolume}, applied: ${initialVolume}`)
     
     const activeAudio: ActiveAudio = {
       audio: audioData,
@@ -484,7 +604,8 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
       if (audioData.fade_in_ms > 0) {
         element.volume = 0
         element.play().catch(console.warn)
-        fadeAudio(element, isMuted ? 0 : audioData.volume * masterVolume, audioData.fade_in_ms)
+        const fadeTarget = calculateVolume(audioData.volume, isMuted, masterVolume)
+        fadeAudio(element, fadeTarget, audioData.fade_in_ms)
       } else {
         element.play().catch(console.warn)
       }
@@ -494,7 +615,7 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
     element.addEventListener('ended', () => {
       activeAudiosRef.current.delete(audioData.id)
     })
-  }, [fadeAudio, isMuted, masterVolume])
+  }, [fadeAudio, isMuted, masterVolume, calculateVolume])
 
   // Stop an audio with optional fade
   const stopAudio = useCallback((audioId: string, fadeOut: boolean = true) => {
@@ -528,10 +649,12 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
   useEffect(() => {
     activeAudiosRef.current.forEach(activeAudio => {
       if (!activeAudio.isFadingOut) {
-        activeAudio.element.volume = isMuted ? 0 : activeAudio.audio.volume * masterVolume
+        // Kayıtlı volume değerini clamp ederek uygula
+        const newVolume = calculateVolume(activeAudio.audio.volume, isMuted, masterVolume)
+        activeAudio.element.volume = newVolume
       }
     })
-  }, [isMuted, masterVolume])
+  }, [isMuted, masterVolume, calculateVolume])
 
   // Manage audio playback based on current scene/panel
   useEffect(() => {
@@ -661,9 +784,34 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
     }
   }, [currentPanelIndex, currentSceneId, resetControlsTimer])
 
+  // Smooth scene change helper
+  const changeSceneSmoothly = useCallback((
+    newSceneId: string, 
+    newPanelIndex: number, 
+    newRevealedPanels?: Set<number>
+  ) => {
+    setIsSceneTransitioning(true)
+    
+    // Wait for fade out, then change scene
+    setTimeout(() => {
+      setCurrentSceneId(newSceneId)
+      setCurrentPanelIndex(newPanelIndex)
+      if (newRevealedPanels) {
+        setRevealedPanels(newRevealedPanels)
+      } else {
+        setRevealedPanels(new Set([0]))
+      }
+      
+      // Wait a frame then fade in
+      requestAnimationFrame(() => {
+        setIsSceneTransitioning(false)
+      })
+    }, 150)
+  }, [])
+
   // Navigation - Go Next
   const goNext = useCallback(() => {
-    if (showChoices || storyEnded) return
+    if (showChoices || storyEnded || isSceneTransitioning) return
     
     resetControlsTimer()
     
@@ -672,55 +820,35 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
       return
     }
     
+    // Aynı sahne içinde sonraki panel
     if (currentPanelIndex < sortedPanels.length - 1) {
       const nextIndex = currentPanelIndex + 1
       setCurrentPanelIndex(nextIndex)
+      // Panel-to-panel modda revealed panelleri güncelle
       setRevealedPanels(prev => new Set([...prev, nextIndex]))
       return
     }
     
+    // Son paneldeyiz
     if (isAtLastPanel) {
       if (isEndingScene) {
         setStoryEnded(true)
         return
       }
       
+      // Sonraki sahneye geç
       if (normalFlowConnection) {
         setHistory(prev => [...prev, { 
           sceneId: currentSceneId, 
           panelIndex: currentPanelIndex,
           revealedPanels: new Set(revealedPanels)
         }])
-        setCurrentSceneId(normalFlowConnection.to_scene_id)
-        setCurrentPanelIndex(0)
+        
+        changeSceneSmoothly(normalFlowConnection.to_scene_id, 0)
         return
       }
     }
-  }, [currentPanelIndex, sortedPanels.length, isAtDecisionPoint, isAtLastPanel, isEndingScene, normalFlowConnection, showChoices, storyEnded, currentSceneId, revealedPanels, resetControlsTimer])
-
-  // Navigation - Go Previous
-  const goPrev = useCallback(() => {
-    resetControlsTimer()
-    
-    if (showChoices) {
-      setShowChoices(false)
-      return
-    }
-    if (storyEnded) {
-      setStoryEnded(false)
-      return
-    }
-    
-    if (currentPanelIndex > 0) {
-      setCurrentPanelIndex(prev => prev - 1)
-    } else if (history.length > 0) {
-      const lastEntry = history[history.length - 1]
-      setHistory(prev => prev.slice(0, -1))
-      setCurrentSceneId(lastEntry.sceneId)
-      setCurrentPanelIndex(lastEntry.panelIndex)
-      setRevealedPanels(lastEntry.revealedPanels)
-    }
-  }, [currentPanelIndex, history, showChoices, storyEnded, resetControlsTimer])
+  }, [currentPanelIndex, sortedPanels.length, isAtDecisionPoint, isAtLastPanel, isEndingScene, normalFlowConnection, showChoices, storyEnded, currentSceneId, revealedPanels, resetControlsTimer, isSceneTransitioning, changeSceneSmoothly])
 
   const handleChoice = useCallback((choice: Choice) => {
     setHistory(prev => [...prev, { 
@@ -728,11 +856,11 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
       panelIndex: currentPanelIndex,
       revealedPanels: new Set(revealedPanels)
     }])
-    setCurrentSceneId(choice.to_scene_id)
-    setCurrentPanelIndex(0)
     setShowChoices(false)
     setStoryEnded(false)
-  }, [currentSceneId, currentPanelIndex, revealedPanels])
+    
+    changeSceneSmoothly(choice.to_scene_id, 0)
+  }, [currentSceneId, currentPanelIndex, revealedPanels, changeSceneSmoothly])
 
   // Mouse move handler (desktop only)
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
@@ -747,9 +875,8 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
     
     setMousePos({ x: e.clientX, y: e.clientY })
     
-    if (relX < 0.3) {
-      setHoverSide('left')
-    } else if (relX > 0.7) {
+    // Sadece sağ taraf için hover göster (ileri git)
+    if (relX > 0.7) {
       setHoverSide('right')
     } else {
       setHoverSide(null)
@@ -774,20 +901,22 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
     const x = e.clientX - rect.left
     const relX = x / rect.width
     
-    if (relX < 0.3 && canGoBack) {
-      goPrev()
-    } else if (relX > 0.7) {
+    if (relX > 0.7) {
       goNext()
-    } else {
-      // Middle area - toggle controls on mobile, go next on desktop
+    } else if (relX > 0.3) {
+      // Orta alan - mobilde kontrolleri aç/kapa, masaüstünde ileri git
       if (isMobile || isTablet) {
         setShowControls(prev => !prev)
         resetControlsTimer()
       } else {
         goNext()
       }
+    } else {
+      // Sol alan - sadece kontrolleri aç/kapa
+      setShowControls(prev => !prev)
+      resetControlsTimer()
     }
-  }, [showChoices, storyEnded, showLanguageMenu, canGoBack, goPrev, goNext, isMobile, isTablet, resetControlsTimer])
+  }, [showChoices, storyEnded, showLanguageMenu, goNext, isMobile, isTablet, resetControlsTimer])
 
   // Touch handlers for mobile
   const touchStartX = useRef<number | null>(null)
@@ -812,16 +941,14 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
     // Minimum swipe distance - adjusted for screen size
     const minSwipeDistance = isMobile ? 40 : 60
     
-    // Horizontal swipe check
+    // Horizontal swipe check - sadece sola kaydırma (ileri git)
     if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > minSwipeDistance) {
       touchHandled.current = true
-      if (deltaX > 0 && canGoBack) {
-        // Swipe right - go back
-        goPrev()
-      } else if (deltaX < 0) {
+      if (deltaX < 0) {
         // Swipe left - go next
         goNext()
       }
+      // Sağa kaydırma (geri) devre dışı
     } else if (Math.abs(deltaX) < 15 && Math.abs(deltaY) < 15) {
       // Tap - determine action based on tap position
       touchHandled.current = true
@@ -829,12 +956,10 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
       const tapX = touchEndX - rect.left
       const relX = tapX / rect.width
       
-      if (relX < 0.25 && canGoBack) {
-        goPrev()
-      } else if (relX > 0.75) {
+      if (relX > 0.75) {
         goNext()
       } else {
-        // Center tap - toggle controls
+        // Sol ve orta alan - kontrolleri aç/kapa
         setShowControls(prev => !prev)
         resetControlsTimer()
       }
@@ -842,19 +967,16 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
     
     touchStartX.current = null
     touchStartY.current = null
-  }, [showChoices, storyEnded, canGoBack, goPrev, goNext, isMobile, resetControlsTimer])
+  }, [showChoices, storyEnded, goNext, isMobile, resetControlsTimer])
 
-  // Keyboard navigation
+  // Keyboard navigation - sadece ileri (geri devre dışı)
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'ArrowRight' || e.key === ' ') {
         e.preventDefault()
         if (!showChoices && !storyEnded) goNext()
       }
-      if (e.key === 'ArrowLeft') {
-        e.preventDefault()
-        goPrev()
-      }
+      // ArrowLeft (geri) devre dışı
       if (e.key === 'Escape') {
         if (showLanguageMenu) {
           setShowLanguageMenu(false)
@@ -887,7 +1009,7 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
     }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
-  }, [goNext, goPrev, showChoices, storyEnded, toggleFullscreen, router, showLanguageMenu])
+  }, [goNext, showChoices, storyEnded, toggleFullscreen, router, showLanguageMenu])
 
   // Loading screen
   if (isLoading || !isCurrentImageLoaded) {
@@ -971,23 +1093,39 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
   
   const padding = getPadding()
   
+  // Split screen hesaplaması - karar sahnesi için (minimal)
+  const choiceButtonHeight = isMobile ? 44 : 48 // Her butonun yüksekliği (kompakt)
+  const choiceSpacing = isMobile ? 6 : 8 // Butonlar arası boşluk (minimal)
+  const choicePadding = isMobile ? 8 : 12 // Üst/alt padding (minimal)
+  const choiceCount = sceneChoices.length
+  const choiceAreaHeight = showChoices && choiceCount > 0 
+    ? (choiceButtonHeight * choiceCount) + (choiceSpacing * (choiceCount - 1)) + (choicePadding * 2)
+    : 0
+  
+  // Görsel için kullanılabilir alan - viewSize zaten viewport'un ölçülmüş boyutu
+  // bottom offset uygulandığında ResizeObserver yeni boyutu ölçecek
+  const effectiveViewHeight = viewSize.h
+  
   // Calculate transform for focus mode
   const scaleX = (viewSize.w - padding * 2) / currentPanel.width
-  const scaleY = (viewSize.h - padding * 2) / currentPanel.height
+  const scaleY = (effectiveViewHeight - padding * 2) / currentPanel.height
   const maxScale = isMobile ? 5 : isTablet ? 4 : 3
   const focusScale = Math.min(scaleX, scaleY, maxScale)
   const panelCenterX = currentPanel.x + currentPanel.width / 2
   const panelCenterY = currentPanel.y + currentPanel.height / 2
   const focusTranslateX = viewSize.w / 2 - panelCenterX * focusScale
-  const focusTranslateY = viewSize.h / 2 - panelCenterY * focusScale
+  const focusTranslateY = effectiveViewHeight / 2 - panelCenterY * focusScale
 
-  // Calculate transform for panel-to-panel mode (fit whole image)
-  const p2pPadding = isMobile ? 8 : isTablet ? 20 : 40
+  // Calculate transform for panel-to-panel mode
+  // Panel-to-panel: TÜM SAYFA SABİT - sadece overlay animasyonu
+  const p2pPadding = isMobile ? 8 : isTablet ? 16 : 24
   const p2pScaleX = (viewSize.w - p2pPadding * 2) / currentScene.image_width
-  const p2pScaleY = (viewSize.h - p2pPadding * 2) / currentScene.image_height
-  const p2pScale = Math.min(p2pScaleX, p2pScaleY, 1)
+  const p2pScaleY = (effectiveViewHeight - p2pPadding * 2) / currentScene.image_height
+  const p2pScale = Math.min(p2pScaleX, p2pScaleY, 1) // Max 1x, tüm görüntüyü sığdır
+  
+  // Görüntüyü merkeze al (SABİT - panele göre değişmez)
   const p2pTranslateX = (viewSize.w - currentScene.image_width * p2pScale) / 2
-  const p2pTranslateY = (viewSize.h - currentScene.image_height * p2pScale) / 2
+  const p2pTranslateY = (effectiveViewHeight - currentScene.image_height * p2pScale) / 2
 
   const currentClipPath = generateClipPath(currentPanel)
 
@@ -1003,16 +1141,6 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
       ref={containerRef}
       className="reader-container flex flex-col"
     >
-      {/* Progress bar - always visible on mobile */}
-      <div className="absolute top-0 left-0 right-0 z-50 h-1 bg-white/10 safe-area-top">
-        <div 
-          className="h-full bg-orange-500 transition-all duration-300 ease-out"
-          style={{ 
-            width: `${((currentPanelIndex + 1) / sortedPanels.length) * 100}%` 
-          }}
-        />
-      </div>
-
       {/* Top left - Mode toggle buttons */}
       <div 
         className={`absolute z-50 flex items-center gap-1 transition-all duration-300 ${
@@ -1066,7 +1194,7 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
               title="Dil değiştir (L)"
             >
               <Globe size={iconSize} />
-              <span className="text-[10px] uppercase font-bold">{currentLanguage}</span>
+              <span className="text-[10px] font-bold">{currentLanguage.toLocaleUpperCase('tr-TR')}</span>
             </button>
             
             {showLanguageMenu && (
@@ -1093,7 +1221,7 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
           </div>
         )}
 
-        {/* Audio Controls - Vertical Volume slider + mute */}
+        {/* Audio Controls - Vertical Volume Slider */}
         {audios && audios.length > 0 && (
           <div className="relative group">
             <button 
@@ -1104,32 +1232,40 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
               {isMuted ? <VolumeX size={iconSize} /> : <Volume2 size={iconSize} />}
             </button>
             
-            {/* Vertical Volume slider - shows on hover */}
-            <div className="absolute right-1/2 translate-x-1/2 top-full mt-2 glass-dark rounded-xl p-3 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200">
-              <div className="flex flex-col items-center gap-2">
-                <Volume2 size={14} className="text-gray-400" />
-                <div className="relative h-24 w-6 flex items-center justify-center">
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    value={isMuted ? 0 : masterVolume * 100}
-                    onChange={(e) => {
-                      const val = Number(e.target.value) / 100
-                      setMasterVolume(val)
-                      if (val > 0) setIsMuted(false)
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                    className="absolute h-20 w-1.5 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-orange-500"
-                    style={{
-                      writingMode: 'vertical-lr',
-                      direction: 'rtl',
-                      WebkitAppearance: 'slider-vertical'
-                    }}
+            {/* Vertical Volume Slider */}
+            <div 
+              className="absolute right-1/2 translate-x-1/2 top-full mt-2 glass-dark rounded-xl p-2.5 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex flex-col items-center gap-1.5">
+                <Volume2 size={12} className="text-gray-400" />
+                
+                {/* Vertical slider track */}
+                <div 
+                  className="relative h-24 w-1.5 bg-gray-700 rounded-full cursor-pointer"
+                  onClick={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect()
+                    const y = e.clientY - rect.top
+                    const percentage = 1 - (y / rect.height)
+                    const newVolume = Math.max(0, Math.min(1, percentage))
+                    setMasterVolume(newVolume)
+                    if (newVolume > 0) setIsMuted(false)
+                  }}
+                >
+                  {/* Fill */}
+                  <div 
+                    className="absolute bottom-0 left-0 right-0 bg-orange-500 rounded-full transition-all duration-100"
+                    style={{ height: `${isMuted ? 0 : masterVolume * 100}%` }}
+                  />
+                  {/* Thumb */}
+                  <div 
+                    className="absolute left-1/2 -translate-x-1/2 w-3 h-3 bg-white rounded-full shadow-md transition-all duration-100"
+                    style={{ bottom: `calc(${isMuted ? 0 : masterVolume * 100}% - 6px)` }}
                   />
                 </div>
-                <VolumeX size={14} className="text-gray-400" />
-                <div className="text-center text-xs text-gray-400 mt-1">
+                
+                <VolumeX size={12} className="text-gray-400" />
+                <div className="text-[10px] text-gray-400 font-medium">
                   {isMuted ? 'Sessiz' : `${Math.round(masterVolume * 100)}%`}
                 </div>
               </div>
@@ -1157,11 +1293,14 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
         </button>
       </div>
 
-      {/* Viewport */}
+      {/* Viewport - Split screen when choices shown */}
       <div 
         ref={viewRef}
-        className="absolute inset-0 overflow-hidden"
-        style={{ cursor: hoverSide && !isTouchDevice ? 'none' : 'default' }}
+        className="absolute inset-0 overflow-hidden transition-all duration-300 ease-out"
+        style={{ 
+          bottom: showChoices && sceneChoices.length > 0 ? choiceAreaHeight : 0,
+          cursor: hoverSide && !isTouchDevice ? 'none' : 'default' 
+        }}
         onMouseMove={handleMouseMove}
         onMouseLeave={() => setHoverSide(null)}
         onClick={handleViewClick}
@@ -1177,8 +1316,9 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
               top: 0,
               transform: `translate(${focusTranslateX}px, ${focusTranslateY}px) scale(${focusScale})`,
               transformOrigin: '0 0',
-              transition: 'transform 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
-              willChange: 'transform'
+              transition: 'transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease-out',
+              willChange: 'transform, opacity',
+              opacity: isSceneTransitioning ? 0 : 1
             }}
           >
             {/* Dimmed background image */}
@@ -1226,7 +1366,7 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
           </div>
         )}
 
-        {/* PANEL-TO-PANEL MODE */}
+        {/* PANEL-TO-PANEL MODE - Tüm sayfa sabit, sadece overlay animasyonu */}
         {readingMode === 'panel-to-panel' && (
           <div
             style={{
@@ -1235,6 +1375,8 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
               top: 0,
               transform: `translate(${p2pTranslateX}px, ${p2pTranslateY}px) scale(${p2pScale})`,
               transformOrigin: '0 0',
+              transition: 'opacity 0.2s ease-out', // Sadece sahne geçişi için opacity
+              opacity: isSceneTransitioning ? 0 : 1
             }}
           >
             {/* Full image */}
@@ -1268,7 +1410,7 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
                     backgroundColor: 'black',
                     clipPath: panelClipPath,
                     opacity: isRevealed ? 0 : 0.92,
-                    transition: 'opacity 0.5s ease-out',
+                    transition: 'opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
                     pointerEvents: 'none'
                   }}
                 />
@@ -1286,7 +1428,7 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
                 clipPath: currentClipPath,
                 boxShadow: 'inset 0 0 0 3px rgba(249, 115, 22, 0.5)',
                 pointerEvents: 'none',
-                transition: 'clip-path 0.3s ease-out'
+                transition: 'clip-path 0.35s cubic-bezier(0.4, 0, 0.2, 1)'
               }}
             />
             
@@ -1320,84 +1462,246 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
             }}
           >
             <div 
-              className={`w-12 h-12 rounded-full bg-white/90 flex items-center justify-center shadow-lg transition-all ${
-                hoverSide === 'left' && !canGoBack ? 'opacity-30 scale-90' : 'opacity-100'
-              }`}
+              className="w-12 h-12 rounded-full bg-white/90 flex items-center justify-center shadow-lg transition-all opacity-100"
             >
-              {hoverSide === 'left' ? (
-                <ChevronLeft size={24} className="text-gray-800" />
-              ) : (
-                <ChevronRight size={24} className="text-gray-800" />
-              )}
+              <ChevronRight size={24} className="text-gray-800" />
             </div>
           </div>
         )}
 
         {/* Mobile/Tablet navigation buttons */}
+      </div>
 
-        {/* Choice overlay */}
-        {showChoices && sceneChoices.length > 0 && (
+      {/* Choice buttons area - Fixed bottom section */}
+      {showChoices && sceneChoices.length > 0 && (
+        <div 
+          className="absolute left-0 right-0 bottom-0 z-40 bg-black animate-slideInFromBottom"
+          style={{ height: choiceAreaHeight }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Subtle top border */}
+          <div className="absolute top-0 left-0 right-0 h-px bg-white/10" />
+          
           <div 
-            className="absolute inset-0 flex flex-col justify-end animate-fadeIn"
-            onClick={(e) => e.stopPropagation()}
+            className="h-full flex flex-col justify-center"
           >
-            <div className="bg-gradient-to-t from-black/95 via-black/80 to-transparent pt-16 sm:pt-20 pb-safe">
-              <div className="max-w-md mx-auto px-4 sm:px-6 pb-4 sm:pb-6 space-y-2 sm:space-y-3">
-                <p className="text-white/60 text-xs sm:text-sm text-center mb-3 sm:mb-4">Bir seçim yapın</p>
-                {sceneChoices.map((choice, index) => (
+            <div 
+              className="mx-auto" 
+              style={{ 
+                gap: isMobile ? 6 : 8, 
+                display: 'flex', 
+                flexDirection: 'column',
+                width: currentScene.image_width * p2pScale,
+                maxWidth: 'calc(100% - 16px)'
+              }}
+            >
+              {sceneChoices.map((choice, index) => {
+                const colors = [
+                  { bg: '#ee5454', border: '#c43c3c', text: '#fff' },
+                  { bg: '#4c69f6', border: '#3a54d4', text: '#fff' },
+                  { bg: '#f6db35', border: '#d4bc20', text: '#1a1a1a' },
+                  { bg: '#22c55e', border: '#1a9d4a', text: '#fff' },
+                  { bg: '#a855f7', border: '#8b3fd4', text: '#fff' },
+                ]
+                const colorSet = colors[index % colors.length]
+                
+                return (
                   <button
                     key={choice.id}
                     onClick={(e) => { e.stopPropagation(); handleChoice(choice) }}
-                    className="w-full px-4 sm:px-5 py-3.5 sm:py-4 glass hover:bg-white/20 active:bg-white/25 rounded-xl text-white text-left transition-all cursor-pointer animate-fadeInUp"
-                    style={{ animationDelay: `${index * 100}ms` }}
-                  >
-                    <span className="text-white/50 font-medium mr-2 sm:mr-3">{index + 1}</span>
-                    <span className="text-sm sm:text-base">{choice.choice_text}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Story ended overlay */}
-        {storyEnded && (
-          <div 
-            className="absolute inset-0 flex flex-col justify-end animate-fadeIn"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="bg-gradient-to-t from-black via-black/90 to-transparent pt-24 sm:pt-32 pb-safe">
-              <div className="max-w-lg mx-auto px-4 pb-4 sm:pb-8 text-center">
-                <h2 className="text-2xl sm:text-3xl font-bold text-white mb-3 sm:mb-4 animate-fadeInUp">🎉 Hikaye Bitti!</h2>
-                <p className="text-white/70 mb-6 sm:mb-8 text-sm sm:text-base animate-fadeInUp" style={{ animationDelay: '100ms' }}>
-                  Bu hikayenin sonuna ulaştın.
-                </p>
-                <div className="flex flex-col sm:flex-row gap-3 justify-center animate-fadeInUp" style={{ animationDelay: '200ms' }}>
-                  <button
-                    onClick={(e) => { 
-                      e.stopPropagation()
-                      setCurrentSceneId(startScene?.id || '')
-                      setCurrentPanelIndex(0)
-                      setStoryEnded(false)
-                      setRevealedPanels(new Set([0]))
-                      setHistory([])
+                    className="w-full text-left cursor-pointer animate-fadeInUp transition-all duration-150 hover:scale-[1.015] hover:brightness-110 active:scale-[0.985]"
+                    style={{ 
+                      animationDelay: `${index * 60}ms`,
+                      animationFillMode: 'backwards',
+                      backgroundColor: colorSet.bg,
+                      border: `2px solid ${colorSet.border}`,
+                      borderRadius: '8px',
+                      height: isMobile ? 44 : 48
                     }}
-                    className="px-6 py-3 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 active:scale-95 text-white rounded-xl font-medium transition-all cursor-pointer"
                   >
-                    🔄 Baştan Oku
+                    <div className="flex items-center gap-2.5 px-3 sm:px-4 h-full">
+                      {/* Number badge */}
+                      <div 
+                        className="flex-shrink-0 w-6 h-6 flex items-center justify-center bg-black/20 rounded-full"
+                      >
+                        <span 
+                          className="font-black text-xs"
+                          style={{ 
+                            fontFamily: "'Bangers', cursive",
+                            color: colorSet.text
+                          }}
+                        >
+                          {index + 1}
+                        </span>
+                      </div>
+                      
+                      {/* Choice text - Türkçe uyumlu */}
+                      <span 
+                        className="font-semibold text-sm tracking-wide flex-1 line-clamp-1"
+                        style={{ 
+                          color: colorSet.text,
+                          fontFamily: "'Comic Neue', 'Comic Sans MS', cursive"
+                        }}
+                      >
+                        {choice.choice_text?.toLocaleUpperCase('tr-TR')}
+                      </span>
+                      
+                      {/* Arrow */}
+                      <div 
+                        className="flex-shrink-0"
+                        style={{ color: colorSet.text }}
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4">
+                          <path d="M9 6l6 6-6 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      </div>
+                    </div>
                   </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); router.push('/') }}
-                    className="px-6 py-3 glass hover:bg-white/20 active:scale-95 text-white rounded-xl font-medium transition-all cursor-pointer"
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Story ended overlay - Comic Style */}
+      {storyEnded && (
+        <div 
+          className="absolute inset-0 flex flex-col justify-center items-center animate-fadeIn overflow-hidden"
+          onClick={(e) => e.stopPropagation()}
+        >
+            {/* Comic halftone background */}
+            <div 
+              className="absolute inset-0 bg-black/90"
+              style={{
+                backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.06) 1px, transparent 1px)',
+                backgroundSize: '8px 8px'
+              }}
+            />
+            
+            {/* Celebration burst */}
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              {[...Array(12)].map((_, i) => (
+                <div
+                  key={i}
+                  className="absolute h-[150%] w-1.5 bg-gradient-to-t from-transparent via-yellow-400/15 to-transparent"
+                  style={{
+                    transform: `rotate(${i * 30}deg)`,
+                    animation: 'pulse 2.5s ease-in-out infinite',
+                    animationDelay: `${i * 0.15}s`
+                  }}
+                />
+              ))}
+            </div>
+            
+            <div className="relative z-10 max-w-lg mx-auto px-4 text-center">
+              {/* Comic sound effect title */}
+              <div className="mb-6 sm:mb-8 animate-bounceIn">
+                <span 
+                  className="inline-block text-5xl sm:text-7xl font-black italic tracking-tight select-none"
+                  style={{ 
+                    fontFamily: "'Bangers', 'Comic Sans MS', cursive",
+                    color: '#f6db35',
+                    WebkitTextStroke: '2px black',
+                    textShadow: '4px 4px 0px #000, 6px 6px 0px rgba(0,0,0,0.3)',
+                    transform: 'rotate(-2deg)'
+                  }}
+                >
+                  THE END!
+                </span>
+              </div>
+              
+              <p 
+                className="text-white/80 text-lg sm:text-xl mb-8 animate-fadeInUp"
+                style={{ 
+                  fontFamily: "'Comic Neue', cursive",
+                  animationDelay: '200ms'
+                }}
+              >
+                Bu hikayenin sonuna ulaştın! 🎉
+              </p>
+              
+              {/* Action buttons - Enhanced Comic style */}
+              <div className="flex flex-col sm:flex-row gap-5 justify-center animate-fadeInUp" style={{ animationDelay: '400ms' }}>
+                <button
+                  onClick={(e) => { 
+                    e.stopPropagation()
+                    setStoryEnded(false)
+                    setHistory([])
+                    changeSceneSmoothly(startScene?.id || '', 0, new Set([0]))
+                  }}
+                  className="group relative cursor-pointer"
+                  style={{ transform: 'rotate(-1deg)' }}
+                >
+                  {/* Multiple shadow layers */}
+                  <div className="absolute inset-0 bg-black/40 translate-x-3 translate-y-3 blur-[2px]" />
+                  <div className="absolute inset-0 bg-black translate-x-2 translate-y-2 transition-transform duration-150 group-hover:translate-x-1 group-hover:translate-y-1 group-active:translate-x-0 group-active:translate-y-0" />
+                  
+                  <div 
+                    className="relative px-8 py-4 overflow-hidden transition-transform duration-150 group-hover:scale-[1.03] group-active:scale-[0.97]"
+                    style={{ 
+                      backgroundColor: '#4c69f6',
+                      border: '4px solid #2a4ad4',
+                      boxShadow: 'inset 0 -4px 0 #2a4ad4, inset 0 4px 0 #7b92ff'
+                    }}
                   >
-                    🏠 Ana Sayfaya Dön
-                  </button>
-                </div>
+                    {/* Inner glow */}
+                    <div 
+                      className="absolute inset-0 opacity-30"
+                      style={{ background: 'linear-gradient(135deg, #7b92ff 0%, transparent 50%)' }}
+                    />
+                    <span 
+                      className="relative text-white font-black text-lg sm:text-xl tracking-wider"
+                      style={{ 
+                        fontFamily: "'Bangers', cursive",
+                        textShadow: '2px 2px 0px rgba(0,0,0,0.4)'
+                      }}
+                    >
+                      🔄 BAŞTAN OKU
+                    </span>
+                    {/* Corner fold */}
+                    <div className="absolute bottom-0 right-0 w-6 h-6" style={{ background: 'linear-gradient(135deg, transparent 50%, #2a4ad4 50%)' }} />
+                  </div>
+                </button>
+                
+                <button
+                  onClick={(e) => { e.stopPropagation(); router.push('/') }}
+                  className="group relative cursor-pointer"
+                  style={{ transform: 'rotate(1deg)' }}
+                >
+                  {/* Multiple shadow layers */}
+                  <div className="absolute inset-0 bg-black/40 translate-x-3 translate-y-3 blur-[2px]" />
+                  <div className="absolute inset-0 bg-black translate-x-2 translate-y-2 transition-transform duration-150 group-hover:translate-x-1 group-hover:translate-y-1 group-active:translate-x-0 group-active:translate-y-0" />
+                  
+                  <div 
+                    className="relative px-8 py-4 bg-white overflow-hidden transition-transform duration-150 group-hover:scale-[1.03] group-active:scale-[0.97]"
+                    style={{ 
+                      border: '4px solid #1a1a1a',
+                      boxShadow: 'inset 0 -4px 0 #d4d4d4, inset 0 4px 0 #ffffff'
+                    }}
+                  >
+                    {/* Inner glow */}
+                    <div 
+                      className="absolute inset-0 opacity-30"
+                      style={{ background: 'linear-gradient(135deg, #fff 0%, transparent 50%)' }}
+                    />
+                    <span 
+                      className="relative text-black font-black text-lg sm:text-xl tracking-wider"
+                      style={{ 
+                        fontFamily: "'Bangers', cursive",
+                        textShadow: '1px 1px 0px rgba(255,255,255,0.5)'
+                      }}
+                    >
+                      🏠 ANA SAYFA
+                    </span>
+                    {/* Corner fold */}
+                    <div className="absolute bottom-0 right-0 w-6 h-6" style={{ background: 'linear-gradient(135deg, transparent 50%, #1a1a1a 50%)' }} />
+                  </div>
+                </button>
               </div>
             </div>
           </div>
         )}
-      </div>
 
       {/* Home button */}
       <button 
@@ -1414,20 +1718,6 @@ export default function StoryReader({ story, choices, audios }: StoryReaderProps
         <Home size={smallIconSize} />
       </button>
 
-      {/* Panel counter */}
-      <div 
-        className={`absolute z-40 text-white/40 text-xs sm:text-sm font-medium transition-all ${
-          showControls ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
-        }`}
-        style={{
-          bottom: isMobile ? 16 : 24,
-          right: isMobile ? 16 : 24,
-        }}
-      >
-        <span className="text-white/60">{currentPanelIndex + 1}</span>
-        <span className="mx-1">/</span>
-        <span>{sortedPanels.length}</span>
-      </div>
     </div>
   )
 }
