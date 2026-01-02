@@ -36,6 +36,7 @@ import type { StoryAudio, AudioType, Scene, Panel } from '@/types/database'
 
 interface LocalAudio extends StoryAudio {
   isNew?: boolean
+  isPlaying?: boolean
 }
 
 interface AudioManagerProps {
@@ -626,8 +627,7 @@ export default function AudioManager({ storyId, scenes, onClose }: AudioManagerP
       scene_id: sceneId,
       panel_id: panelId,
       isNew: true,
-      isPlaying: false,
-      audioElement: undefined
+      isPlaying: false
     }
 
     setAudios(prev => [...prev, newAudio])
